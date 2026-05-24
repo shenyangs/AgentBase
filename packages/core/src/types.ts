@@ -403,6 +403,50 @@ export type MemoryStore = {
   promote(id: string): Promise<MemoryBlock>;
 };
 
+export type ExperienceEvent = {
+  id: string;
+  runId?: string;
+  type: "task" | "tool" | "approval" | "eval" | "feedback" | "decision" | string;
+  summary: string;
+  refs?: ArtifactRef[];
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type ExperienceAtom = {
+  id: string;
+  eventIds: string[];
+  title: string;
+  statement: string;
+  confidence?: number;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExperienceLesson = {
+  id: string;
+  atomIds: string[];
+  title: string;
+  guidance: string;
+  appliesTo?: string[];
+  evidence?: Array<{ type: "run" | "eval" | "user" | "trace" | string; ref?: string; summary: string }>;
+  status: "draft" | "reviewed" | "promoted" | "superseded";
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ExperienceLedger = {
+  addEvent(event: Omit<ExperienceEvent, "id" | "createdAt"> & Partial<Pick<ExperienceEvent, "id" | "createdAt">>): Promise<ExperienceEvent>;
+  addAtom(atom: Omit<ExperienceAtom, "id" | "createdAt" | "updatedAt"> & Partial<Pick<ExperienceAtom, "id" | "createdAt" | "updatedAt">>): Promise<ExperienceAtom>;
+  addLesson(lesson: Omit<ExperienceLesson, "id" | "status" | "createdAt" | "updatedAt"> & Partial<Pick<ExperienceLesson, "id" | "status" | "createdAt" | "updatedAt">>): Promise<ExperienceLesson>;
+  listEvents(filter?: { runId?: string; type?: string; limit?: number }): Promise<ExperienceEvent[]>;
+  listAtoms(filter?: { tag?: string; limit?: number }): Promise<ExperienceAtom[]>;
+  listLessons(filter?: { status?: ExperienceLesson["status"]; limit?: number }): Promise<ExperienceLesson[]>;
+};
+
 export type WikiPageRecord = {
   id: string;
   title: string;
@@ -487,6 +531,55 @@ export type WorkflowResumeState = {
 
 export type WorkflowExecutor = {
   execute(workflow: WorkflowSpec, input?: { runId?: string; sessionId?: string; signal?: AbortSignal; resume?: boolean; resumeState?: WorkflowResumeState; maxParallelTasks?: number }): Promise<WorkflowExecutionResult>;
+};
+
+export type CapabilityDraft = {
+  id: string;
+  title: string;
+  summary: string;
+  taskRunId?: string;
+  suggestedInstructions?: string;
+  suggestedTools?: string[];
+  evidence?: Array<{ type: "run" | "trace" | "eval" | "user" | string; ref?: string; summary: string }>;
+  status: "draft" | "promoted" | "rejected";
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type Capability = {
+  id: string;
+  title: string;
+  summary: string;
+  instructions: string;
+  defaultTools?: string[];
+  sourceDraftId?: string;
+  version: number;
+  status: "active" | "deprecated";
+  createdAt: string;
+  updatedAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CapabilityRun = {
+  id: string;
+  capabilityId: string;
+  runId?: string;
+  input: string;
+  status: "completed" | "failed" | "cancelled";
+  output?: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CapabilityStore = {
+  createDraft(draft: Omit<CapabilityDraft, "id" | "status" | "createdAt" | "updatedAt"> & Partial<Pick<CapabilityDraft, "id" | "status" | "createdAt" | "updatedAt">>): Promise<CapabilityDraft>;
+  listDrafts(filter?: { status?: CapabilityDraft["status"]; limit?: number }): Promise<CapabilityDraft[]>;
+  getDraft(id: string): Promise<CapabilityDraft | undefined>;
+  promoteDraft(id: string, input?: { instructions?: string; defaultTools?: string[]; capabilityId?: string }): Promise<{ draft: CapabilityDraft; capability: Capability }>;
+  listCapabilities(filter?: { status?: Capability["status"]; limit?: number }): Promise<Capability[]>;
+  getCapability(id: string): Promise<Capability | undefined>;
+  recordRun(run: Omit<CapabilityRun, "id" | "createdAt"> & Partial<Pick<CapabilityRun, "id" | "createdAt">>): Promise<CapabilityRun>;
 };
 
 export type EvalCase = {

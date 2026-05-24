@@ -12,11 +12,12 @@
   "scripts": {
     "agentbase": "node packages/cli/dist/index.js",
     "build": "pnpm -r --filter './packages/*' build",
+    "contracts": "node scripts/contract-tests.mjs",
     "test": "vitest run",
     "e2e": "node scripts/e2e-local-first.mjs",
     "references": "node scripts/reference-patterns.mjs",
     "conformance": "node scripts/conformance-local-first.mjs",
-    "release:check": "pnpm build && pnpm test && pnpm e2e && pnpm references && pnpm conformance",
+    "release:check": "pnpm build && pnpm contracts && pnpm test && pnpm e2e && pnpm references && pnpm conformance",
     "serve": "node packages/cli/dist/index.js serve",
     "studio": "node packages/cli/dist/index.js studio",
     "clean": "pnpm -r --filter './packages/*' clean && rm -rf coverage"

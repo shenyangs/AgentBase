@@ -30,11 +30,25 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/assets: {}
+
+  packages/capabilities:
+    dependencies:
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/cli:
     dependencies:
       '@agentbase/artifacts':
         specifier: workspace:*
         version: link:../artifacts
+      '@agentbase/assets':
+        specifier: workspace:*
+        version: link:../assets
+      '@agentbase/capabilities':
+        specifier: workspace:*
+        version: link:../capabilities
       '@agentbase/code-index':
         specifier: workspace:*
         version: link:../code-index
@@ -53,6 +67,9 @@ importers:
       '@agentbase/evolution':
         specifier: workspace:*
         version: link:../evolution
+      '@agentbase/experience':
+        specifier: workspace:*
+        version: link:../experience
       '@agentbase/guardrails':
         specifier: workspace:*
         version: link:../guardrails
@@ -135,6 +152,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/contracts:
+    dependencies:
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/core: {}
 
   packages/evals:
@@ -150,6 +173,12 @@ importers:
         version: 2.9.0
 
   packages/evolution:
+    dependencies:
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/experience:
     dependencies:
       '@agentbase/core':
         specifier: workspace:*

@@ -15,6 +15,7 @@ This expands to:
 
 ```bash
 pnpm build
+pnpm contracts
 pnpm test
 pnpm e2e
 pnpm references

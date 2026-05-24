@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { FileArtifactStore, createMaterializeRefTool } from "@agentbase/artifacts";
+import { writeSeedAsset } from "@agentbase/assets";
+import { JsonCapabilityStore, capabilityStoreFile } from "@agentbase/capabilities";
 import { createCodeIndexTools } from "@agentbase/code-index";
 import {
   defaultConfig,
@@ -48,6 +50,7 @@ import {
 } from "@agentbase/core";
 import { loadEvalSuite, runEvalSuite, summarizeEvalResults } from "@agentbase/evals";
 import { gateEvolutionProposal, proposeEvolutionFromTrace } from "@agentbase/evolution";
+import { JsonExperienceLedger, experienceLedgerFile } from "@agentbase/experience";
 import { scanRuntimeEvents, scanTextForGuardrails, summarizeGuardrailResults } from "@agentbase/guardrails";
 import { JsonMemoryProposalStore, JsonMemoryStore, createMemoryTools } from "@agentbase/memory";
 import { listMcpServerTools, loadMcpServerTools } from "@agentbase/mcp";
@@ -133,6 +136,12 @@ export async function main(argv = process.argv.slice(2), io: CliIo = defaultIo):
     case "wiki":
       await commandWiki(rest, io);
       return;
+    case "experience":
+      await commandExperience(rest, io);
+      return;
+    case "capability":
+      await commandCapability(rest, io);
+      return;
     case "replay":
       await commandReplay(rest, io);
       return;
@@ -179,10 +188,11 @@ async function commandInit(args: string[], io: CliIo): Promise<void> {
   await mkdir(path.join(target, ".agentbase"), { recursive: true });
   await mkdir(path.join(target, "src"), { recursive: true });
 
-  await writeJsonIfAbsent(path.join(target, ".agentbase", "config.json"), defaultConfig(path.basename(target)));
-  await writeJsonIfAbsent(path.join(target, ".agentbase", "agent.json"), defaultAgent());
-  await writeTextIfAbsent(
-    path.join(target, "README.md"),
+  await writeManagedJson(target, ".agentbase/config.json", defaultConfig(path.basename(target)), "agentbase:init");
+  await writeManagedJson(target, ".agentbase/agent.json", defaultAgent(), "agentbase:init");
+  await writeManagedText(
+    target,
+    "README.md",
     [
       `# ${path.basename(target)}`,
       "",
@@ -195,9 +205,10 @@ async function commandInit(args: string[], io: CliIo): Promise<void> {
       "pnpm agentbase trace list",
       "```",
       ""
-    ].join("\n")
+    ].join("\n"),
+    "agentbase:init"
   );
-  await writeTextIfAbsent(path.join(target, "src", "index.ts"), `export const message = "Hello from AgentBase fixture";\n`);
+  await writeManagedText(target, "src/index.ts", `export const message = "Hello from AgentBase fixture";\n`, "agentbase:init");
 
   io.stdout(`Initialized AgentBase project at ${target}`);
 }
@@ -948,6 +959,149 @@ async function commandWiki(args: string[], io: CliIo): Promise<void> {
   throw new Error("Usage: agentbase wiki index|query|open");
 }
 
+async function commandExperience(args: string[], io: CliIo): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const parsed = parseFlags(rest);
+  const cwd = path.resolve(process.cwd(), String(parsed.flags.cwd ?? "."));
+  const config = await loadConfig(cwd);
+  const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+  const ledger = new JsonExperienceLedger({ file: experienceLedgerFile(cwd) });
+
+  if (subcommand === "event") {
+    const summary = parsed.positionals.join(" ").trim();
+    if (!summary) {
+      await platform?.close();
+      throw new Error("Usage: agentbase experience event <summary> [--type task] [--run <run-id>]");
+    }
+    const event = await ledger.addEvent({
+      runId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined,
+      type: typeof parsed.flags.type === "string" ? parsed.flags.type : "task",
+      summary
+    });
+    await platform?.writeAudit({ action: "experience.event.created", target: event.id, runId: event.runId, actor: "cli", metadata: { type: event.type } });
+    io.stdout(JSON.stringify(event, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "atom") {
+    const title = parsed.positionals.join(" ").trim();
+    const statement = typeof parsed.flags.statement === "string" ? parsed.flags.statement : "";
+    if (!title || !statement) {
+      await platform?.close();
+      throw new Error("Usage: agentbase experience atom <title> --statement <text> [--events <id,id>] [--tags <tag,tag>]");
+    }
+    const atom = await ledger.addAtom({
+      title,
+      statement,
+      eventIds: csvFlag(parsed.flags.events) ?? [],
+      tags: csvFlag(parsed.flags.tags)
+    });
+    await platform?.writeAudit({ action: "experience.atom.created", target: atom.id, actor: "cli", metadata: { tags: atom.tags } });
+    io.stdout(JSON.stringify(atom, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "lesson") {
+    const title = parsed.positionals.join(" ").trim();
+    const guidance = typeof parsed.flags.guidance === "string" ? parsed.flags.guidance : "";
+    if (!title || !guidance) {
+      await platform?.close();
+      throw new Error("Usage: agentbase experience lesson <title> --guidance <text> [--atoms <id,id>]");
+    }
+    const lesson = await ledger.addLesson({
+      title,
+      guidance,
+      atomIds: csvFlag(parsed.flags.atoms) ?? []
+    });
+    await platform?.writeAudit({ action: "experience.lesson.created", target: lesson.id, actor: "cli", metadata: { status: lesson.status } });
+    io.stdout(JSON.stringify(lesson, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "list") {
+    const kind = parsed.positionals[0] ?? "lessons";
+    const limit = Number(parsed.flags.limit ?? 20);
+    const value =
+      kind === "events"
+        ? await ledger.listEvents({ limit })
+        : kind === "atoms"
+          ? await ledger.listAtoms({ limit })
+          : kind === "lessons"
+            ? await ledger.listLessons({ limit })
+            : undefined;
+    if (!value) {
+      await platform?.close();
+      throw new Error("Usage: agentbase experience list events|atoms|lessons");
+    }
+    io.stdout(JSON.stringify(value, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  await platform?.close();
+  throw new Error("Usage: agentbase experience event|atom|lesson|list");
+}
+
+async function commandCapability(args: string[], io: CliIo): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const parsed = parseFlags(rest);
+  const cwd = path.resolve(process.cwd(), String(parsed.flags.cwd ?? "."));
+  const config = await loadConfig(cwd);
+  const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+  const store = new JsonCapabilityStore({ file: capabilityStoreFile(cwd) });
+
+  if (subcommand === "draft") {
+    const runId = parsed.positionals[0];
+    const title = typeof parsed.flags.title === "string" ? parsed.flags.title : parsed.positionals.slice(1).join(" ").trim();
+    if (!runId || !title) {
+      await platform?.close();
+      throw new Error("Usage: agentbase capability draft <run-id> --title <title> [--summary <text>] [--instructions <text>] [--tools <tool,tool>]");
+    }
+    const draft = await store.createDraft({
+      title,
+      summary: typeof parsed.flags.summary === "string" ? parsed.flags.summary : `Reusable capability drafted from ${runId}.`,
+      taskRunId: runId,
+      suggestedInstructions: typeof parsed.flags.instructions === "string" ? parsed.flags.instructions : undefined,
+      suggestedTools: csvFlag(parsed.flags.tools),
+      evidence: [{ type: "run", ref: runId, summary: "Capability draft source run." }]
+    });
+    await platform?.writeAudit({ action: "capability.drafted", target: draft.id, runId, actor: "cli", metadata: { title: draft.title } });
+    io.stdout(JSON.stringify(draft, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "promote") {
+    const draftId = parsed.positionals[0];
+    if (!draftId) {
+      await platform?.close();
+      throw new Error("Usage: agentbase capability promote <draft-id> [--instructions <text>] [--tools <tool,tool>]");
+    }
+    const result = await store.promoteDraft(draftId, {
+      instructions: typeof parsed.flags.instructions === "string" ? parsed.flags.instructions : undefined,
+      defaultTools: csvFlag(parsed.flags.tools)
+    });
+    await platform?.writeAudit({ action: "capability.promoted", target: result.capability.id, actor: "cli", metadata: { draftId } });
+    io.stdout(JSON.stringify(result, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "list") {
+    const drafts = parsed.flags.drafts === true;
+    const limit = Number(parsed.flags.limit ?? 20);
+    io.stdout(JSON.stringify(drafts ? await store.listDrafts({ limit }) : await store.listCapabilities({ limit }), null, 2));
+    await platform?.close();
+    return;
+  }
+
+  await platform?.close();
+  throw new Error("Usage: agentbase capability draft|promote|list");
+}
+
 async function commandReplay(args: string[], io: CliIo): Promise<void> {
   const [subcommand, ...rest] = args;
   const parsed = parseFlags(rest);
@@ -1443,7 +1597,7 @@ function parseRunId(output: string): string {
 async function scaffoldReferencePattern(pattern: ReferencePattern, targetDir: string, force: boolean): Promise<void> {
   await mkdir(path.join(targetDir, ".agentbase", "evals"), { recursive: true });
   await mkdir(path.join(targetDir, "src"), { recursive: true });
-  await cp(patternFixtureDir(pattern), targetDir, { recursive: true, force, errorOnExist: force });
+  await copyManagedDirectory(patternFixtureDir(pattern), targetDir, `pattern:${pattern.id}:fixture`, force);
 
   const configFile = path.join(targetDir, ".agentbase", "config.json");
   let config: AgentBaseConfig;
@@ -1460,10 +1614,11 @@ async function scaffoldReferencePattern(pattern: ReferencePattern, targetDir: st
 
   const agentText = await readFile(patternAgentFile(pattern), "utf8");
   const evalText = await readFile(patternEvalFile(pattern), "utf8");
-  await writePatternFile(path.join(targetDir, ".agentbase", "agent.json"), agentText, force);
-  await writePatternFile(path.join(targetDir, ".agentbase", "evals", `${pattern.id}.yaml`), evalText, force);
+  await writePatternFile(targetDir, ".agentbase/agent.json", agentText, force, `pattern:${pattern.id}:agent`);
+  await writePatternFile(targetDir, `.agentbase/evals/${pattern.id}.yaml`, evalText, force, `pattern:${pattern.id}:eval`);
   await writePatternFile(
-    path.join(targetDir, "AGENTBASE_PATTERN.md"),
+    targetDir,
+    "AGENTBASE_PATTERN.md",
     [
       `# ${pattern.title}`,
       "",
@@ -1475,17 +1630,13 @@ async function scaffoldReferencePattern(pattern: ReferencePattern, targetDir: st
       "```",
       ""
     ].join("\n"),
-    force
+    force,
+    `pattern:${pattern.id}:guide`
   );
 }
 
-async function writePatternFile(file: string, value: string, force: boolean): Promise<void> {
-  if (force) {
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, value.endsWith("\n") ? value : `${value}\n`, "utf8");
-    return;
-  }
-  await writeTextIfAbsent(file, value.endsWith("\n") ? value : `${value}\n`);
+async function writePatternFile(workspaceRoot: string, relativePath: string, value: string, force: boolean, source: string): Promise<void> {
+  await writeManagedText(workspaceRoot, relativePath, value.endsWith("\n") ? value : `${value}\n`, source, force);
 }
 
 async function loadTools(cwd: string, config: AgentBaseConfig, platform?: SqlitePlatformStore): Promise<Tool[]> {
@@ -1978,6 +2129,44 @@ async function writeTextIfAbsent(file: string, value: string): Promise<void> {
   }
 }
 
+async function writeManagedJson(workspaceRoot: string, relativePath: string, value: unknown, source: string, force = false): Promise<void> {
+  await writeManagedText(workspaceRoot, relativePath, `${JSON.stringify(value, null, 2)}\n`, source, force);
+}
+
+async function writeManagedText(workspaceRoot: string, relativePath: string, value: string, source: string, force = false): Promise<void> {
+  await writeSeedAsset({
+    workspaceRoot,
+    relativePath,
+    content: value,
+    source,
+    force
+  });
+}
+
+async function copyManagedDirectory(sourceDir: string, workspaceRoot: string, source: string, force: boolean): Promise<void> {
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const relativePath = path.relative(sourceDir, sourcePath);
+    await copyManagedDirectoryEntry(sourcePath, workspaceRoot, relativePath, source, force);
+  }
+}
+
+async function copyManagedDirectoryEntry(sourcePath: string, workspaceRoot: string, relativePath: string, source: string, force: boolean): Promise<void> {
+  const info = await stat(sourcePath);
+  if (info.isDirectory()) {
+    const entries = await readdir(sourcePath, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyManagedDirectoryEntry(path.join(sourcePath, entry.name), workspaceRoot, path.join(relativePath, entry.name), source, force);
+    }
+    return;
+  }
+  if (!info.isFile()) {
+    return;
+  }
+  await writeManagedText(workspaceRoot, relativePath, await readFile(sourcePath, "utf8"), source, force);
+}
+
 async function appendJsonArray(file: string, value: unknown): Promise<void> {
   let values: unknown[] = [];
   try {
@@ -2164,6 +2353,8 @@ function helpText(): string {
     "  agentbase approval list|show|approve|deny [--cwd <dir>]",
     "  agentbase memory list|search|add|promote|propose|proposals|review|promote-proposal [--cwd <dir>]",
     "  agentbase wiki index|query|open [--cwd <dir>]",
+    "  agentbase experience event|atom|lesson|list [--cwd <dir>]",
+    "  agentbase capability draft|promote|list [--cwd <dir>]",
     "  agentbase replay run|diff <run-id-or-jsonl> [--cwd <dir>]",
     "  agentbase eval run [--suite <file>] [--run <run-id-or-jsonl>] [--output <text>] [--cwd <dir>]",
     "  agentbase evolve propose|test|promote|rollback [--suite <file>] [--run <run-id-or-jsonl>] [--cwd <dir>]",

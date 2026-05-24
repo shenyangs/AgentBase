@@ -6,12 +6,13 @@ This repo treats "100%" as local-first OSS 1.0, not hosted SaaS. The release gat
 pnpm release:check
 ```
 
-`pnpm release:check` expands to build, test, E2E, reference-pattern, and
+`pnpm release:check` expands to build, contract tests, test, E2E, reference-pattern, and
 conformance gates.
 
 ## Current Gate Coverage
 
 - Package build for all workspace packages.
+- Contract tests for provider/tool/tool-result/workflow interface invariants.
 - Unit and integration tests across runtime, tools, stores, server, replay, eval, memory, wiki, code index, MCP, and CLI.
 - Local-first E2E smoke covering:
   - `init`
@@ -63,6 +64,7 @@ conformance gates.
 - Replay/eval/guardrail/evolution gate is connected: replay extracts output, run metadata, and events from recorded traces; eval suites support JSON/YAML, runtime assertions, trace event assertions, tool-sequence assertions, and guardrail assertions; evolution test attaches eval evidence before promotion.
 - Durable resume now writes boundary checkpoints for context/model/tool/approval phases, and `run --resume` can continue from the latest durable boundary without rerunning completed model/tool work.
 - Memory promotion now has an explicit governance path: proposal, review, optional eval evidence, and promotion into durable scoped memory.
+- Experience and capability assets now have local stores and CLI entry points, so successful task runs can become event/atom/lesson records and promoted reusable capabilities.
 - Observability export supports redacted JSONL, OpenTelemetry-ish, OpenInference/Phoenix-ish, and Langfuse-ish payloads from CLI and local server, plus HTTP push through configured export destinations.
 - CLI exposes `approval`, `config`, `policy`, `provider`, `patterns`, `tools`, `conformance`, `store`, `backup restore`, and the previous runtime/tool/memory/wiki/replay/eval commands.
 - Local server exposes health/readiness, config/provider/tool/policy control-plane APIs, runs, context snapshots, replay diff, conformance reports, sessions, approvals, guardrail scan/audit, artifacts, memory promotion, wiki, evals, code search, audit, store doctor/compact/prune/backup, export push, and trace export with token auth and response redaction.

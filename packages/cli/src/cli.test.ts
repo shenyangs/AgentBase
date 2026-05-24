@@ -1,4 +1,4 @@
-import { readFile, mkdtemp } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +13,8 @@ describe("cli", () => {
       stderr: (message: string) => output.push(message)
     };
 
+    await main(["init", cwd], io);
+    await writeFile(path.join(cwd, "README.md"), "# User README\n", "utf8");
     await main(["init", cwd], io);
     await main(["patterns", "list"], io);
     const patternCwd = await mkdtemp(path.join(tmpdir(), "agentbase-pattern-"));
@@ -29,6 +31,16 @@ describe("cli", () => {
     await main(["memory", "promote-proposal", proposalId, "--cwd", cwd], io);
     await main(["memory", "search", "reviewed memory", "--cwd", cwd], io);
     await main(["run", "summarize this repo", "--mock", "--cwd", cwd], io);
+    await main(["experience", "event", "Repo analysis succeeded", "--run", "run_fixture", "--cwd", cwd], io);
+    const experienceEvent = JSON.parse(output.at(-1) ?? "{}") as { id?: string };
+    await main(["experience", "atom", "Evidence backed summaries", "--statement", "Summaries should cite inspected files.", "--events", experienceEvent.id ?? "", "--tags", "repo", "--cwd", cwd], io);
+    const experienceAtom = JSON.parse(output.at(-1) ?? "{}") as { id?: string };
+    await main(["experience", "lesson", "Cite inspected files", "--guidance", "Prefer file-backed claims.", "--atoms", experienceAtom.id ?? "", "--cwd", cwd], io);
+    await main(["experience", "list", "lessons", "--cwd", cwd], io);
+    await main(["capability", "draft", "run_fixture", "--title", "Repo analyst capability", "--summary", "Analyze repos with trace evidence.", "--tools", "list_files,read_file", "--cwd", cwd], io);
+    const capabilityDraft = JSON.parse(output.at(-1) ?? "{}") as { id?: string };
+    await main(["capability", "promote", capabilityDraft.id ?? "", "--instructions", "Analyze repositories with evidence.", "--cwd", cwd], io);
+    await main(["capability", "list", "--cwd", cwd], io);
     await main(["store", "doctor", "--cwd", cwd], io);
     await main(["approval", "list", "--cwd", cwd], io);
     await main(["trace", "list", "--cwd", cwd], io);
@@ -41,7 +53,10 @@ describe("cli", () => {
     expect(await readFile(path.join(patternRunCwd, ".agentbase", "evals", "repo-analyst.yaml"), "utf8")).toContain("repo-analyst-reference");
     expect(joined).toContain('"ok": true');
     expect(joined).toContain("Prefer reviewed memory promotion");
+    expect(joined).toContain("Repo analysis succeeded");
+    expect(joined).toContain("Repo analyst capability");
     expect(joined).toContain("Mock repo summary");
     expect(joined).toContain("run_");
+    expect(await readFile(path.join(cwd, "README.md"), "utf8")).toBe("# User README\n");
   });
 });
