@@ -38,7 +38,7 @@ import {
 
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 export type StoreRetentionOptions = {
   before?: string | Date;
@@ -119,12 +119,12 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         run_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
         type TEXT NOT NULL,
         ts TEXT NOT NULL,
-        data TEXT NOT NULL
+        data TEXT NOT NULL,
+        UNIQUE(run_id, seq)
       );
-      CREATE INDEX IF NOT EXISTS idx_events_run_ts ON events(run_id, ts);
-      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 
       CREATE TABLE IF NOT EXISTS artifacts (
         ref TEXT PRIMARY KEY,
@@ -256,6 +256,13 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
       CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
     `);
 
+    this.ensureEventsAppendOnlySchema();
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_events_run_seq ON events(run_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_events_run_ts ON events(run_id, ts);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+    `);
+
     this.enableFts();
     this.db
       .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)")
@@ -273,8 +280,11 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
 
   async write(event: RuntimeEvent): Promise<void> {
     this.db
-      .prepare("INSERT OR REPLACE INTO events (id, run_id, type, ts, data) VALUES (?, ?, ?, ?, ?)")
-      .run(event.id, event.runId, event.type, event.ts, stringify(event.data));
+      .prepare(
+        `INSERT INTO events (id, run_id, seq, type, ts, data)
+         VALUES (?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM events WHERE run_id = ?), ?, ?, ?)`
+      )
+      .run(event.id, event.runId, event.runId, event.type, event.ts, stringify(event.data));
 
     if (event.type === "run.started") {
       await this.putRun({
@@ -315,13 +325,13 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
 
   async readRun(runId: string): Promise<RuntimeEvent[]> {
     return this.db
-      .prepare("SELECT * FROM events WHERE run_id = ? ORDER BY ts ASC")
+      .prepare("SELECT * FROM events WHERE run_id = ? ORDER BY seq ASC")
       .all(runId)
       .map(rowToEvent);
   }
 
   async exportJsonl(file: string, runId?: string): Promise<void> {
-    const events = runId ? await this.readRun(runId) : this.db.prepare("SELECT * FROM events ORDER BY ts ASC").all().map(rowToEvent);
+    const events = runId ? await this.readRun(runId) : this.db.prepare("SELECT * FROM events ORDER BY ts ASC, run_id ASC, seq ASC").all().map(rowToEvent);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
   }
@@ -964,6 +974,52 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
     }
   }
 
+  private ensureEventsAppendOnlySchema(): void {
+    const columns = tableColumnNames(this.db, "events");
+    if (columns.has("seq")) {
+      return;
+    }
+
+    this.db.exec("BEGIN");
+    try {
+      this.db.exec(`
+        ALTER TABLE events RENAME TO events_legacy_append_migration;
+        CREATE TABLE events (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          seq INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          ts TEXT NOT NULL,
+          data TEXT NOT NULL,
+          UNIQUE(run_id, seq)
+        );
+        INSERT INTO events (id, run_id, seq, type, ts, data)
+        SELECT
+          legacy.id,
+          legacy.run_id,
+          (
+            SELECT count(*)
+            FROM events_legacy_append_migration AS prior
+            WHERE prior.run_id = legacy.run_id
+              AND (
+                prior.ts < legacy.ts
+                OR (prior.ts = legacy.ts AND prior.rowid <= legacy.rowid)
+              )
+          ) AS seq,
+          legacy.type,
+          legacy.ts,
+          legacy.data
+        FROM events_legacy_append_migration AS legacy
+        ORDER BY legacy.run_id ASC, legacy.ts ASC, legacy.rowid ASC;
+        DROP TABLE events_legacy_append_migration;
+      `);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   private rebuildFts(): void {
     if (!this.ftsEnabled) return;
     this.db.exec(`
@@ -1023,6 +1079,15 @@ export class SqlitePlatformStore implements TraceStore, ArtifactStore, WikiStore
 
 function rowToEvent(row: any): RuntimeEvent {
   return { id: row.id, runId: row.run_id, type: row.type, ts: row.ts, data: parseJson(row.data, {}) };
+}
+
+function tableColumnNames(db: DatabaseSyncType, table: string): Set<string> {
+  return new Set(
+    db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .map((row: any) => String(row.name))
+  );
 }
 
 function rowToRun(row: any): RunRecord {

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { Tool } from "@agentbase/core";
@@ -68,7 +68,11 @@ function writeFileTool(): Tool {
     async execute(input, ctx) {
       const { path: userPath, content, append = false } = input as { path: string; content: string; append?: boolean };
       const file = await resolveWorkspacePath(ctx.workspaceRoot, userPath, { forWrite: true, mustExist: false });
-      const existed = await pathExists(file);
+      const fileStat = await lstat(file).catch(() => undefined);
+      if (fileStat?.isSymbolicLink()) {
+        return { ok: false, error: { code: "SYMLINK_WRITE_BLOCKED", message: `Refusing to write through a symlink: ${userPath}` } };
+      }
+      const existed = Boolean(fileStat);
       const before = existed ? await readFile(file, "utf8") : "";
       const after = append ? before + content : content;
 

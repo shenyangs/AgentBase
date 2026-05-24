@@ -2,10 +2,10 @@
 
 All notable changes to AgentBase will be documented in this file.
 
-## 0.1.0 - Local-First 1.0 RC
+## 0.1.0 - Local Runtime Preview
 
-This first public preview is a source-distributed release candidate for the
-local-first AgentBase runtime platform.
+This first public preview is a source-distributed local runtime preview for the
+AgentBase runtime platform.
 
 ### Added
 

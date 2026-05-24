@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,6 +16,31 @@ describe("tools-fs", () => {
   it("blocks paths outside the workspace", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "agentbase-fs-"));
     await expect(resolveWorkspacePath(root, "../outside.txt")).rejects.toThrow(/escapes workspace/);
+  });
+
+  it("blocks symlink escapes outside the workspace", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agentbase-fs-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "agentbase-outside-"));
+    await writeFile(path.join(outside, "secret.txt"), "do not read", "utf8");
+    await symlink(path.join(outside, "secret.txt"), path.join(root, "secret-link.txt"));
+
+    await expect(resolveWorkspacePath(root, "secret-link.txt")).rejects.toThrow(/escapes workspace/);
+  });
+
+  it("refuses to write through workspace symlinks", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "agentbase-fs-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "agentbase-outside-"));
+    const outsideFile = path.join(outside, "secret.txt");
+    await writeFile(outsideFile, "original", "utf8");
+    await symlink(outsideFile, path.join(root, "secret-link.txt"));
+    const writeTool = createFsTools().find((tool) => tool.name === "write_file")!;
+    const ctx = { runId: "run", workspaceRoot: root, signal: new AbortController().signal, trace, policy: { name: "workspace-write" as const }, env: {} };
+
+    const result = await writeTool.execute({ path: "secret-link.txt", content: "changed" }, ctx);
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("SYMLINK_WRITE_BLOCKED");
+    expect(await readFile(outsideFile, "utf8")).toBe("original");
   });
 
   it("reads, writes, lists, and searches files", async () => {

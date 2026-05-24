@@ -52,6 +52,7 @@ export function createShellTool(): Tool {
           output: {
             command,
             cwd,
+            status: "success",
             exitCode: 0,
             stdout: limitedStdout.value,
             stderr: limitedStderr.value,
@@ -70,6 +71,7 @@ export function createShellTool(): Tool {
           output: {
             command,
             cwd,
+            status: timedOut ? "timed_out" : "command_failed",
             exitCode: typeof failure.code === "number" ? failure.code : 1,
             stdout: limitedStdout.value,
             stderr: limitedStderr.value || (timedOut ? "Command timed out" : ""),

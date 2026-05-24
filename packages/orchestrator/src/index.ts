@@ -5,6 +5,7 @@ import {
   type RunState,
   type Runtime,
   type RuntimeEvent,
+  type RuntimeEventType,
   type SpecialistHandoffDecision,
   type SpecialistManifest,
   type TaskSpec,
@@ -249,7 +250,7 @@ export function createRuntimeWorkflowExecutor(options: RuntimeWorkflowExecutorOp
       const parentRunId = input.runId ?? createId(options.parentRunIdPrefix ?? "workflow_run");
       const startedAt = new Date().toISOString();
       const resumeState = input.resumeState ?? (input.resume ? await loadWorkflowResumeState(parentRunId, workflow, options.readRun) : undefined);
-      const lifecycleEvent = input.resume ? "run.resumed" : "run.started";
+      const lifecycleEvent: RuntimeEventType = input.resume ? "run.resumed" : "run.started";
       await writeWorkflowEvent(options.trace, parentRunId, lifecycleEvent, {
         agent: "workflow",
         input: workflow.name,
@@ -381,21 +382,21 @@ async function loadWorkflowResumeState(parentRunId: string, workflow: WorkflowSp
   return Object.keys(completedTasks).length > 0 || Object.keys(taskRunStates).length > 0 ? { completedTasks, taskRunStates } : undefined;
 }
 
-function workflowStepTerminalEvent(status: WorkflowExecutionResult["status"]): string {
+function workflowStepTerminalEvent(status: WorkflowExecutionResult["status"]): RuntimeEventType {
   if (status === "completed") return "workflow.step.completed";
   if (status === "waiting_approval") return "workflow.step.waiting_approval";
   if (status === "cancelled") return "workflow.step.cancelled";
   return "workflow.step.failed";
 }
 
-function workflowTerminalEvent(status: WorkflowExecutionResult["status"]): string {
+function workflowTerminalEvent(status: WorkflowExecutionResult["status"]): RuntimeEventType {
   if (status === "completed") return "workflow.completed";
   if (status === "waiting_approval") return "workflow.waiting_approval";
   if (status === "cancelled") return "workflow.cancelled";
   return "workflow.failed";
 }
 
-function runTerminalEvent(status: WorkflowExecutionResult["status"]): string {
+function runTerminalEvent(status: WorkflowExecutionResult["status"]): RuntimeEventType {
   if (status === "completed") return "run.completed";
   if (status === "waiting_approval") return "run.waiting_approval";
   if (status === "cancelled") return "run.cancelled";
@@ -538,7 +539,7 @@ function isRunState(value: unknown): value is RunState {
   );
 }
 
-async function writeWorkflowEvent(trace: TraceStore | undefined, runId: string, type: string, data: Record<string, unknown>): Promise<RuntimeEvent | undefined> {
+async function writeWorkflowEvent(trace: TraceStore | undefined, runId: string, type: RuntimeEventType, data: Record<string, unknown>): Promise<RuntimeEvent | undefined> {
   if (!trace) {
     return undefined;
   }

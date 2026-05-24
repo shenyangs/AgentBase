@@ -2,7 +2,7 @@
 
 AgentBase absorbs one important product lesson from long-running agent systems: a successful task should not disappear into a trace file. It should be possible to turn it into reusable experience, and eventually into a reusable capability.
 
-The 1.0 RC contract now separates three layers:
+The v0.1 runtime contract now separates three layers:
 
 ```text
 Run / Trace -> Experience Event -> Experience Atom -> Experience Lesson

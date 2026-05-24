@@ -1,3 +1,4 @@
+import { RUNTIME_EVENT_TYPES } from "@agentbase/core";
 import type {
   ContextSnapshot,
   ModelProvider,
@@ -9,6 +10,8 @@ import type {
   ToolResultEnvelope,
   WorkflowExecutionResult
 } from "@agentbase/core";
+
+const KNOWN_RUNTIME_EVENT_TYPES = new Set<string>(RUNTIME_EVENT_TYPES);
 
 export type ContractSeverity = "error" | "warning";
 
@@ -106,7 +109,11 @@ export function validateTraceContract(events: RuntimeEvent[], name = "trace"): C
   for (const [index, event] of events.entries()) {
     if (!nonEmptyString(event.id)) error(`events[${index}].id`, "event.id must be a non-empty string");
     if (!nonEmptyString(event.runId)) error(`events[${index}].runId`, "event.runId must be a non-empty string");
-    if (!nonEmptyString(event.type)) error(`events[${index}].type`, "event.type must be a non-empty string");
+    if (!nonEmptyString(event.type)) {
+      error(`events[${index}].type`, "event.type must be a non-empty string");
+    } else if (!KNOWN_RUNTIME_EVENT_TYPES.has(event.type)) {
+      error(`events[${index}].type`, `event.type is not part of the runtime event contract: ${event.type}`);
+    }
     if (!nonEmptyString(event.ts)) error(`events[${index}].ts`, "event.ts must be an ISO timestamp string");
     if (!isRecord(event.data)) error(`events[${index}].data`, "event.data must be an object");
   }

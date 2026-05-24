@@ -17,6 +17,7 @@ export default defineConfig({
       "@agentbase/guardrails": here("./packages/guardrails/src/index.ts"),
       "@agentbase/memory": here("./packages/memory/src/index.ts"),
       "@agentbase/patterns": here("./packages/patterns/src/index.ts"),
+      "@agentbase/stores-sqlite": here("./packages/stores-sqlite/src/index.ts"),
       "@agentbase/tools-fs": here("./packages/tools-fs/src/index.ts"),
       "@agentbase/tools-shell": here("./packages/tools-shell/src/index.ts")
     }

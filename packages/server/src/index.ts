@@ -28,6 +28,8 @@ export type AgentBaseServer = {
   close(): Promise<void>;
 };
 
+type GovernanceEventType = "config.updated" | "provider.tested" | "toolset.enabled" | "toolset.disabled" | "toolset.configured" | "policy.updated";
+
 export type LocalRuntimeSecurity = {
   bindHost: string;
   port: number;
@@ -648,7 +650,7 @@ function relayMailboxForServer(options: AgentBaseServerOptions): JsonRelayMailbo
   return new JsonRelayMailbox({ file: relayMailboxFile(workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile))) });
 }
 
-async function writeGovernance(store: SqlitePlatformStore, type: string, data: Record<string, unknown>, actor: string): Promise<void> {
+async function writeGovernance(store: SqlitePlatformStore, type: GovernanceEventType, data: Record<string, unknown>, actor: string): Promise<void> {
   await store.write({
     id: `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     runId: "governance",

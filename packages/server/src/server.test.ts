@@ -66,7 +66,7 @@ describe("server", () => {
       const context = await fetch(`${server.url}/api/runs/run_1/context`, { headers: { authorization: "Bearer secret" } });
       expect(await context.json()).toEqual(expect.objectContaining({ runId: "run_1", contexts: expect.any(Array) }));
       const doctor = await fetch(`${server.url}/api/store/doctor`, { headers: { authorization: "Bearer secret" } });
-      expect(await doctor.json()).toEqual(expect.objectContaining({ ok: true, schemaVersion: 3 }));
+      expect(await doctor.json()).toEqual(expect.objectContaining({ ok: true, schemaVersion: 4 }));
       const config = await fetch(`${server.url}/api/config`, { headers: { authorization: "Bearer secret" } });
       expect(await config.json()).toEqual(expect.objectContaining({ summary: expect.objectContaining({ provider: "mock" }) }));
       const policy = await fetch(`${server.url}/api/policy`, {

@@ -43,6 +43,7 @@ import {
   type ModelProvider,
   type PolicyName,
   type RuntimeEvent,
+  type RuntimeEventInput,
   type RunState,
   type Tool,
   type TraceStore,
@@ -83,6 +84,8 @@ import { createShellTool } from "@agentbase/tools-shell";
 import { createHttpSearchProvider, createStaticSearchProvider, createWebTools } from "@agentbase/tools-web";
 import { JsonlTraceStore, serializeTraceExport, type TraceExportFormat } from "@agentbase/trace";
 import { RepoWiki } from "@agentbase/wiki";
+
+type GovernanceEventType = "config.updated" | "provider.tested" | "toolset.enabled" | "toolset.disabled" | "toolset.configured" | "policy.updated";
 
 export type CliIo = {
   stdout: (message: string) => void;
@@ -1793,8 +1796,8 @@ function cliToolContext(cwd: string) {
     policy: { name: "trusted" as const },
     env: process.env,
     trace: {
-      async write(input: { type: string; data?: Record<string, unknown> }) {
-        return { id: createId("evt"), runId: "cli", ts: new Date().toISOString(), type: input.type, data: input.data ?? {} };
+      async write(input: RuntimeEventInput): Promise<RuntimeEvent> {
+        return { id: createId("evt"), runId: "cli", ts: new Date().toISOString(), type: input.type, data: input.data ?? {} } as RuntimeEvent;
       }
     }
   };
@@ -1938,7 +1941,7 @@ function isSqliteConfig(config: AgentBaseConfig): boolean {
   return config.trace.type !== "jsonl";
 }
 
-async function recordGovernanceEvent(cwd: string, config: AgentBaseConfig, type: string, data: Record<string, unknown>, actor: string): Promise<void> {
+async function recordGovernanceEvent(cwd: string, config: AgentBaseConfig, type: GovernanceEventType, data: Record<string, unknown>, actor: string): Promise<void> {
   if (!isSqliteConfig(config)) {
     return;
   }

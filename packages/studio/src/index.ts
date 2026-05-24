@@ -27,6 +27,8 @@ export type StudioServer = {
   close(): Promise<void>;
 };
 
+type GovernanceEventType = "config.updated" | "provider.tested" | "toolset.enabled" | "toolset.disabled" | "toolset.configured" | "policy.updated";
+
 export type StudioServerOptions = {
   traceDir?: string;
   sqliteFile?: string;
@@ -511,7 +513,7 @@ function workspaceRootForConfig(configFile: string | undefined): string | undefi
   return configFile ? path.dirname(path.dirname(path.resolve(configFile))) : undefined;
 }
 
-async function writeGovernance(store: SqlitePlatformStore | undefined, type: string, data: Record<string, unknown>, actor: string): Promise<void> {
+async function writeGovernance(store: SqlitePlatformStore | undefined, type: GovernanceEventType, data: Record<string, unknown>, actor: string): Promise<void> {
   if (!store) {
     throw new Error("Configuration mutations require SQLite studio mode.");
   }

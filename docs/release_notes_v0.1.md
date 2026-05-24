@@ -1,8 +1,8 @@
 # AgentBase v0.1 Release Notes
 
-AgentBase v0.1 is the first public preview of the Local-First 1.0 release
-candidate. It is meant to be cloned, built, inspected, and extended by teams
-that want an agent runtime contract instead of another one-off agent demo.
+AgentBase v0.1 is the first public preview of the local runtime. It is meant to
+be cloned, built, inspected, and extended by teams that want an agent runtime
+contract instead of another one-off agent demo.
 
 ## Positioning
 
@@ -29,12 +29,16 @@ provider wrapper. It is a reusable local runtime for building agents with:
 - Local Studio for inspecting runs, tool calls, context snapshots, artifacts,
   approvals, memory, wiki, evals, settings, conformance, and export push.
 
+See [STATUS.md](../STATUS.md) for the explicit usable / preview /
+experimental / planned capability matrix.
+
 ## What This Release Is Not
 
 - It is not a hosted SaaS product.
 - It is not a multi-tenant cloud control plane.
 - It is not a published npm 1.0 package set.
 - It does not claim vector retrieval as a built-in 1.0 capability.
+- It does not claim policy checks or approvals are a strong sandbox.
 
 ## Quick Verification
 

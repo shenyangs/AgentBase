@@ -82,6 +82,16 @@ export class ToolExecutor {
     if (!decision.allowed) {
       let approvalId: string | undefined;
       if (decision.requiredApproval) {
+        if (!this.approvals) {
+          const error = {
+            code: "APPROVAL_UNAVAILABLE",
+            message: `Approval is required for ${call.name}, but no approval store is configured.`,
+            details: { blockedPermission: decision.blockedPermission }
+          };
+          await this.trace.write({ type: "tool.rejected", data: { id: call.id, name: call.name, reason: error.message } });
+          return { ok: false, error };
+        }
+
         const existingApproval = await this.findExistingApproval(runId, call.name, call.input);
         if (existingApproval?.status === "approved") {
           await this.trace.write({

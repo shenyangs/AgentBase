@@ -6,10 +6,12 @@ Use this before making the repository public.
 
 - `LICENSE` is present.
 - `README.md` has a copy-paste quickstart.
+- `STATUS.md` separates usable, preview, experimental, and planned surfaces.
 - `CHANGELOG.md` describes the first preview.
 - `docs/release_notes_v0.1.md` states what is and is not ready.
 - `CONTRIBUTING.md` explains setup and the release gate.
-- `SECURITY.md` explains how secrets and high-risk tools should be handled.
+- `SECURITY.md` explains how secrets and high-risk tools should be handled, and
+  says policy gates are not a strong sandbox.
 - Issue and PR templates exist under `.github/`.
 - CI and GitHub release workflows exist under `.github/workflows/`.
 - Root `package.json` exposes `pnpm agentbase` and `pnpm release:check`.
@@ -21,11 +23,11 @@ Use this before making the repository public.
 Use:
 
 ```txt
-v0.1.0 public preview / Local-First 1.0 RC
+v0.1.0 public preview / Local Runtime Preview
 ```
 
-This is honest: the source release is useful and runnable, while npm package
-publishing and vector retrieval are still future work.
+This is honest: the source release is useful and runnable, while the stable 1.0
+contract, npm package publishing, and vector retrieval are still future work.
 
 ## Suggested GitHub Description
 

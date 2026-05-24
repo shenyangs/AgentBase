@@ -1,6 +1,8 @@
-# AgentBase Local-First 1.0 Release Gate
+# AgentBase Local Runtime Preview Release Gate
 
-This repo treats "100%" as local-first OSS 1.0, not hosted SaaS. The release gate is intentionally operational:
+This repo treats "100%" for v0.1 as a trustworthy local runtime preview, not a
+hosted SaaS or stable 1.0 platform. The release gate is intentionally
+operational:
 
 ```bash
 pnpm release:check

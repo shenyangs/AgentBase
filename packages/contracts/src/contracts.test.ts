@@ -124,4 +124,15 @@ describe("contract validators", () => {
     expect(report.ok).toBe(false);
     expect(report.issues.map((issue) => issue.path)).toContain("layers");
   });
+
+  it("rejects unknown runtime event types", () => {
+    const report = validateTraceContract([
+      { id: "evt_1", runId: "run_1", type: "run.started", ts: "2026-01-01T00:00:00.000Z", data: {} },
+      { id: "evt_2", runId: "run_1", type: "agent.did_whatever", ts: "2026-01-01T00:00:01.000Z", data: {} },
+      { id: "evt_3", runId: "run_1", type: "run.completed", ts: "2026-01-01T00:00:02.000Z", data: {} }
+    ] as never);
+
+    expect(report.ok).toBe(false);
+    expect(report.issues).toEqual(expect.arrayContaining([expect.objectContaining({ path: "events[1].type" })]));
+  });
 });

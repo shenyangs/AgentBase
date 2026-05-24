@@ -1,8 +1,12 @@
 import { mkdtemp } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SqlitePlatformStore } from "./index";
+
+const nodeRequire = createRequire(import.meta.url);
+const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
 
 describe("SqlitePlatformStore", () => {
   it("persists runs, events, artifacts, memory, wiki pages, evals, sessions, and exports", async () => {
@@ -50,8 +54,70 @@ describe("SqlitePlatformStore", () => {
     expect((await store.findCodeReferences("src/index.ts#hello"))[0].preview).toBe("hello();");
     expect((await store.listApprovals({ status: "approved" }))[0].id).toBe(approval.id);
     expect((await store.listAudit({ action: "test.audit" }))[0].target).toBe("fixture");
-    expect((await store.doctor()).schemaVersion).toBe(3);
+    expect((await store.doctor()).schemaVersion).toBe(4);
     await store.compact();
+    await store.close();
+  });
+
+  it("keeps trace events append-only and ordered by per-run sequence", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "agentbase-sqlite-"));
+    const store = new SqlitePlatformStore({ file: path.join(dir, "agentbase.sqlite") });
+    await store.write({ id: "evt_same_ts_1", runId: "run_append", type: "run.started", ts: "2026-05-20T00:00:00.000Z", data: { input: "first" } });
+    await store.write({ id: "evt_same_ts_2", runId: "run_append", type: "context.prepared", ts: "2026-05-20T00:00:00.000Z", data: { messageCount: 1 } });
+
+    await expect(
+      store.write({ id: "evt_same_ts_1", runId: "run_append", type: "run.started", ts: "2026-05-20T00:00:01.000Z", data: { input: "overwritten" } })
+    ).rejects.toThrow();
+
+    const events = await store.readRun("run_append");
+    expect(events.map((event) => event.id)).toEqual(["evt_same_ts_1", "evt_same_ts_2"]);
+    expect(events[0].data).toEqual({ input: "first" });
+    expect(
+      store.db.prepare("SELECT id, seq FROM events WHERE run_id = ? ORDER BY seq ASC").all("run_append")
+    ).toEqual([
+      { id: "evt_same_ts_1", seq: 1 },
+      { id: "evt_same_ts_2", seq: 2 }
+    ]);
+    await store.close();
+  });
+
+  it("migrates legacy events tables to append-only per-run sequence", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "agentbase-sqlite-"));
+    const file = path.join(dir, "agentbase.sqlite");
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+      CREATE TABLE events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        ts TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      INSERT INTO events (id, run_id, type, ts, data)
+      VALUES
+        ('evt_legacy_1', 'run_legacy', 'run.started', '2026-05-20T00:00:00.000Z', '{"input":"legacy"}'),
+        ('evt_legacy_2', 'run_legacy', 'run.completed', '2026-05-20T00:00:00.000Z', '{"steps":1}');
+    `);
+    legacy.close();
+
+    const store = new SqlitePlatformStore({ file });
+    await store.write({ id: "evt_legacy_3", runId: "run_legacy", type: "run.resumed", ts: "2026-05-20T00:00:01.000Z", data: {} });
+
+    expect((await store.doctor()).schemaVersion).toBe(4);
+    expect(await store.readRun("run_legacy")).toEqual([
+      expect.objectContaining({ id: "evt_legacy_1", type: "run.started" }),
+      expect.objectContaining({ id: "evt_legacy_2", type: "run.completed" }),
+      expect.objectContaining({ id: "evt_legacy_3", type: "run.resumed" })
+    ]);
+    expect(
+      store.db.prepare("SELECT id, seq FROM events WHERE run_id = ? ORDER BY seq ASC").all("run_legacy")
+    ).toEqual([
+      { id: "evt_legacy_1", seq: 1 },
+      { id: "evt_legacy_2", seq: 2 },
+      { id: "evt_legacy_3", seq: 3 }
+    ]);
     await store.close();
   });
 

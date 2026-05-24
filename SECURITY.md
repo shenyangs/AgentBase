@@ -24,6 +24,11 @@ secrets, tokens, or private workspace data in public issues.
 - Untrusted external content should enter context as evidence, not as higher
   priority instructions.
 
+Policy checks, approvals, redaction, trace/audit facts, and workspace path guards
+are governance controls. They are not a strong sandbox. Shell policy is
+pattern-based; stronger isolation needs containers, dedicated OS users, network
+restrictions, or OS/platform sandboxing.
+
 ## Local Hardening Tips
 
 - Start with mock provider runs.

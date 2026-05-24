@@ -61,7 +61,7 @@ describe("studio", () => {
     try {
       expect(await fetch(server.url).then((response) => response.text())).toContain("AgentBase Studio");
       expect(await fetch(`${server.url}/api/runs/run_1/context`).then((response) => response.json())).toEqual(expect.objectContaining({ runId: "run_1", contexts: expect.any(Array) }));
-      expect(await fetch(`${server.url}/api/store/doctor`).then((response) => response.json())).toEqual(expect.objectContaining({ ok: true, schemaVersion: 3 }));
+      expect(await fetch(`${server.url}/api/store/doctor`).then((response) => response.json())).toEqual(expect.objectContaining({ ok: true, schemaVersion: 4 }));
       expect(await fetch(`${server.url}/api/config`).then((response) => response.json())).toEqual(expect.objectContaining({ summary: expect.objectContaining({ provider: "mock" }) }));
       expect(
         await fetch(`${server.url}/api/policy`, {

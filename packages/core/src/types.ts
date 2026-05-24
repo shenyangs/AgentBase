@@ -222,18 +222,132 @@ export type ContextManager = {
   compact?(state: RunState): Promise<RunState>;
 };
 
-export type RuntimeEvent = {
-  id: string;
-  runId: string;
-  type: string;
-  ts: string;
-  data: Record<string, unknown>;
+export type RuntimeEventData = Record<string, unknown>;
+
+export type RuntimeEventDataByType = {
+  "run.started": RuntimeEventData & { agent?: string; input?: string; policy?: PolicyName; sessionId?: string; parentRunId?: string; metadata?: unknown };
+  "run.resumed": RuntimeEventData & { agent?: string; input?: string; policy?: PolicyName; sessionId?: string; parentRunId?: string; checkpointSteps?: number; metadata?: unknown };
+  "run.waiting_approval": RuntimeEventData & { steps?: number; toolCallId?: string; toolName?: string; approvalId?: string; reason?: string; pendingToolCalls?: unknown[] };
+  "run.paused": RuntimeEventData & { steps?: number; reason?: string };
+  "run.completed": RuntimeEventData & { steps?: number; status?: string; resumedFromPhase?: RunState["phase"] };
+  "run.failed": RuntimeEventData & { steps?: number; reason?: string; toolErrors?: number };
+  "run.cancelled": RuntimeEventData & { steps?: number; reason?: string; toolCallId?: string; toolName?: string; approvalId?: string };
+  "run.checkpoint": RuntimeEventData & { reason?: string; phase?: RunState["phase"]; state?: RunState };
+  "context.prepared": RuntimeEventData & Partial<ContextSnapshot>;
+  "model.completed": RuntimeEventData & { finishReason?: FinishReason; toolCallCount?: number; toolCalls?: unknown[]; outputPreview?: string; usage?: ModelUsage; metadata?: Record<string, unknown> };
+  "policy.checked": RuntimeEventData & { id?: string; name?: string; policy?: PolicyName; permissions?: Permission[]; allowed?: boolean; reason?: string; blockedPermission?: Permission; requiredApproval?: boolean };
+  "policy.override": RuntimeEventData & { id?: string; name?: string; policy?: PolicyName; reason?: string };
+  "tool.started": RuntimeEventData & { id?: string; name?: string; input?: unknown };
+  "tool.completed": RuntimeEventData & { id?: string; name?: string; attempt?: number; outputPreview?: string; metadata?: Record<string, unknown> };
+  "tool.failed": RuntimeEventData & { id?: string; name?: string; attempt?: number; error?: ToolError | Record<string, unknown> };
+  "tool.retry": RuntimeEventData & { id?: string; name?: string; attempt?: number; error?: ToolError | Record<string, unknown> };
+  "tool.rejected": RuntimeEventData & { id?: string; name?: string; reason?: string; approvalId?: string };
+  "artifact.created": RuntimeEventData & { id?: string; kind?: string; toolCallId?: string; toolName?: string; ok?: boolean; summary?: string; preview?: string; artifacts?: ArtifactRef[]; error?: ToolError };
+  "approval.required": RuntimeEventData & { id?: string; approvalId?: string; name?: string; reason?: string; blockedPermission?: Permission; permissions?: Permission[] };
+  "approval.used": RuntimeEventData & { id?: string; approvalId?: string; name?: string; decidedBy?: string; decidedAt?: string };
+  "approval.approved": RuntimeEventData & { approvalId?: string; toolCallId?: string; toolName?: string; decidedBy?: string; reason?: string };
+  "approval.denied": RuntimeEventData & { approvalId?: string; toolCallId?: string; toolName?: string; decidedBy?: string; reason?: string };
+  "file.changed": RuntimeEventData & { path?: string; existed?: boolean; bytes?: number; diff?: unknown };
+  "agent.handoff": RuntimeEventData & { from?: string; to?: string; confidence?: number; reason?: string; needsFreshInfo?: boolean; riskFlags?: string[] };
+  "workflow.started": RuntimeEventData;
+  "workflow.resumed": RuntimeEventData;
+  "workflow.step.started": RuntimeEventData;
+  "workflow.step.resumed": RuntimeEventData;
+  "workflow.step.completed": RuntimeEventData;
+  "workflow.step.waiting_approval": RuntimeEventData;
+  "workflow.step.cancelled": RuntimeEventData;
+  "workflow.step.failed": RuntimeEventData;
+  "workflow.checkpoint": RuntimeEventData;
+  "workflow.completed": RuntimeEventData;
+  "workflow.waiting_approval": RuntimeEventData;
+  "workflow.cancel_requested": RuntimeEventData;
+  "workflow.cancelled": RuntimeEventData;
+  "workflow.failed": RuntimeEventData;
+  "eval.completed": RuntimeEventData;
+  "guardrail.completed": RuntimeEventData;
+  "conformance.completed": RuntimeEventData;
+  "config.updated": RuntimeEventData;
+  "provider.tested": RuntimeEventData;
+  "toolset.enabled": RuntimeEventData;
+  "toolset.disabled": RuntimeEventData;
+  "toolset.configured": RuntimeEventData;
+  "policy.updated": RuntimeEventData;
+  "evolution.promoted": RuntimeEventData;
+  "evolution.rolled_back": RuntimeEventData;
+  "export.completed": RuntimeEventData;
+  "export.failed": RuntimeEventData;
 };
 
-export type RuntimeEventInput = {
-  type: string;
-  data?: Record<string, unknown>;
+export type RuntimeEventType = keyof RuntimeEventDataByType;
+
+export const RUNTIME_EVENT_TYPES = [
+  "run.started",
+  "run.resumed",
+  "run.waiting_approval",
+  "run.paused",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.checkpoint",
+  "context.prepared",
+  "model.completed",
+  "policy.checked",
+  "policy.override",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "tool.retry",
+  "tool.rejected",
+  "artifact.created",
+  "approval.required",
+  "approval.used",
+  "approval.approved",
+  "approval.denied",
+  "file.changed",
+  "agent.handoff",
+  "workflow.started",
+  "workflow.resumed",
+  "workflow.step.started",
+  "workflow.step.resumed",
+  "workflow.step.completed",
+  "workflow.step.waiting_approval",
+  "workflow.step.cancelled",
+  "workflow.step.failed",
+  "workflow.checkpoint",
+  "workflow.completed",
+  "workflow.waiting_approval",
+  "workflow.cancel_requested",
+  "workflow.cancelled",
+  "workflow.failed",
+  "eval.completed",
+  "guardrail.completed",
+  "conformance.completed",
+  "config.updated",
+  "provider.tested",
+  "toolset.enabled",
+  "toolset.disabled",
+  "toolset.configured",
+  "policy.updated",
+  "evolution.promoted",
+  "evolution.rolled_back",
+  "export.completed",
+  "export.failed"
+] as const satisfies readonly RuntimeEventType[];
+
+export type RuntimeEvent<T extends RuntimeEventType = RuntimeEventType> = {
+  id: string;
+  runId: string;
+  type: T;
+  ts: string;
+  data: RuntimeEventDataByType[T];
 };
+
+export type RuntimeEventInput<T extends RuntimeEventType = RuntimeEventType> = T extends RuntimeEventType
+  ? {
+      type: T;
+      data?: RuntimeEventDataByType[T];
+    }
+  : never;
 
 export type TraceWriter = {
   write(event: RuntimeEventInput): Promise<RuntimeEvent>;
