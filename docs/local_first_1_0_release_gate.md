@@ -65,6 +65,10 @@ conformance gates.
 - Durable resume now writes boundary checkpoints for context/model/tool/approval phases, and `run --resume` can continue from the latest durable boundary without rerunning completed model/tool work.
 - Memory promotion now has an explicit governance path: proposal, review, optional eval evidence, and promotion into durable scoped memory.
 - Experience and capability assets now have local stores and CLI entry points, so successful task runs can become event/atom/lesson records and promoted reusable capabilities.
+- Relay mailbox provides a shared local state machine for run/team/approval/export/eval handoff messages through CLI and server API.
+- Specialist manifests let orchestrator agents advertise trigger, handoff, freshness, risk, and result contracts.
+- Context snapshots now expose named layers for stable prefix, memory, wiki/code, artifacts, working set, and dynamic suffix.
+- Local runtime security helper provides per-launch token, random local port, injected auth headers, and token hashing for desktop/server pairing.
 - Observability export supports redacted JSONL, OpenTelemetry-ish, OpenInference/Phoenix-ish, and Langfuse-ish payloads from CLI and local server, plus HTTP push through configured export destinations.
 - CLI exposes `approval`, `config`, `policy`, `provider`, `patterns`, `tools`, `conformance`, `store`, `backup restore`, and the previous runtime/tool/memory/wiki/replay/eval commands.
 - Local server exposes health/readiness, config/provider/tool/policy control-plane APIs, runs, context snapshots, replay diff, conformance reports, sessions, approvals, guardrail scan/audit, artifacts, memory promotion, wiki, evals, code search, audit, store doctor/compact/prune/backup, export push, and trace export with token auth and response redaction.

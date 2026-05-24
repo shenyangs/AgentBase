@@ -41,6 +41,11 @@ describe("cli", () => {
     const capabilityDraft = JSON.parse(output.at(-1) ?? "{}") as { id?: string };
     await main(["capability", "promote", capabilityDraft.id ?? "", "--instructions", "Analyze repositories with evidence.", "--cwd", cwd], io);
     await main(["capability", "list", "--cwd", cwd], io);
+    await main(["relay", "send", "run", "{\"prompt\":\"summarize\"}", "--run", "run_fixture", "--cwd", cwd], io);
+    const relayMessage = JSON.parse(output.at(-1) ?? "{}") as { id?: string };
+    await main(["relay", "deliver", relayMessage.id ?? "", "--cwd", cwd], io);
+    await main(["relay", "ack", relayMessage.id ?? "", "--cwd", cwd], io);
+    await main(["relay", "list", "--status", "acknowledged", "--cwd", cwd], io);
     await main(["store", "doctor", "--cwd", cwd], io);
     await main(["approval", "list", "--cwd", cwd], io);
     await main(["trace", "list", "--cwd", cwd], io);
@@ -55,6 +60,7 @@ describe("cli", () => {
     expect(joined).toContain("Prefer reviewed memory promotion");
     expect(joined).toContain("Repo analysis succeeded");
     expect(joined).toContain("Repo analyst capability");
+    expect(joined).toContain('"status": "acknowledged"');
     expect(joined).toContain("Mock repo summary");
     expect(joined).toContain("run_");
     expect(await readFile(path.join(cwd, "README.md"), "utf8")).toBe("# User README\n");

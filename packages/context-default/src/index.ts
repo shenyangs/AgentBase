@@ -3,6 +3,7 @@ import type {
   ArtifactStore,
   CodeIndexStore,
   ContextManager,
+  ContextLayerSnapshot,
   ContextPrepareInput,
   ContextSnapshot,
   MemoryBlock,
@@ -127,7 +128,8 @@ export function createDefaultContextManager(options: DefaultContextManagerOption
         messageCount: messages.length,
         tokenEstimate: estimateTokens(messages),
         stablePrefixHash: hash(stablePrefix),
-        items
+        items,
+        layers: buildContextLayers(items, messages)
       };
 
       return { messages, snapshot };
@@ -337,6 +339,59 @@ function addMessage(
     included: true,
     reason: rawContent.length > content.length ? `${input.reason}; truncated by context budget` : input.reason,
     preview: content.slice(0, 400)
+  });
+}
+
+function buildContextLayers(items: ContextSnapshot["items"], messages: Message[]): ContextLayerSnapshot[] {
+  const definitions: Array<Omit<ContextLayerSnapshot, "includedItems" | "skippedItems" | "tokenEstimate">> = [
+    {
+      id: "stable-prefix",
+      label: "Stable Prefix",
+      purpose: "Identity, policy, and tool manifest that should remain prompt-cache friendly.",
+      itemTypes: ["stable_prefix"]
+    },
+    {
+      id: "memory",
+      label: "Memory",
+      purpose: "Pinned and relevant durable memory, always treated as untrusted context.",
+      itemTypes: ["pinned_memory", "memory"]
+    },
+    {
+      id: "knowledge",
+      label: "Wiki and Code",
+      purpose: "Project wiki and code-index hits selected by the budget planner.",
+      itemTypes: ["wiki", "code_index"]
+    },
+    {
+      id: "artifacts",
+      label: "Artifacts",
+      purpose: "Artifact refs and compact previews instead of giant raw outputs.",
+      itemTypes: ["artifact_refs", "tool_result_ref"]
+    },
+    {
+      id: "working-set",
+      label: "Working Set",
+      purpose: "Files and refs observed during recent tool work.",
+      itemTypes: ["working_set"]
+    },
+    {
+      id: "dynamic-suffix",
+      label: "Dynamic Suffix",
+      purpose: "Current user intent, assistant loop continuity, and latest concrete preview.",
+      itemTypes: ["user", "assistant", "dynamic_suffix"]
+    }
+  ];
+  const totalTokens = estimateTokens(messages);
+  const totalIncluded = Math.max(1, items.filter((item) => item.included).length);
+  return definitions.map((definition) => {
+    const matching = items.filter((item) => definition.itemTypes.includes(item.type));
+    const includedItems = matching.filter((item) => item.included).length;
+    return {
+      ...definition,
+      includedItems,
+      skippedItems: matching.length - includedItems,
+      tokenEstimate: Math.round((includedItems / totalIncluded) * totalTokens)
+    };
   });
 }
 

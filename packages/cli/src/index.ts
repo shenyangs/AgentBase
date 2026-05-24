@@ -69,6 +69,7 @@ import {
 import { createLiteLLMProvider } from "@agentbase/provider-litellm";
 import { createOllamaProvider } from "@agentbase/provider-ollama";
 import { createOpenAICompatibleProvider } from "@agentbase/provider-openai-compatible";
+import { JsonRelayMailbox, relayMailboxFile } from "@agentbase/relay";
 import { diffReplay, extractReplayOutput, loadReplayTrace, replayRun, summarizeReplay } from "@agentbase/replay";
 import { startAgentBaseServer } from "@agentbase/server";
 import { startStudioServer } from "@agentbase/studio";
@@ -141,6 +142,9 @@ export async function main(argv = process.argv.slice(2), io: CliIo = defaultIo):
       return;
     case "capability":
       await commandCapability(rest, io);
+      return;
+    case "relay":
+      await commandRelay(rest, io);
       return;
     case "replay":
       await commandReplay(rest, io);
@@ -1102,6 +1106,72 @@ async function commandCapability(args: string[], io: CliIo): Promise<void> {
   throw new Error("Usage: agentbase capability draft|promote|list");
 }
 
+async function commandRelay(args: string[], io: CliIo): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const parsed = parseFlags(rest);
+  const cwd = path.resolve(process.cwd(), String(parsed.flags.cwd ?? "."));
+  const config = await loadConfig(cwd);
+  const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+  const mailbox = new JsonRelayMailbox({ file: relayMailboxFile(cwd) });
+
+  if (subcommand === "send") {
+    const channel = parsed.positionals[0];
+    const payloadText = parsed.positionals.slice(1).join(" ").trim();
+    if (!channel || !payloadText) {
+      await platform?.close();
+      throw new Error("Usage: agentbase relay send <channel> <json-or-text> [--type run] [--run <run-id>] [--to <target>]");
+    }
+    const message = await mailbox.send({
+      channel,
+      type: typeof parsed.flags.type === "string" ? parsed.flags.type : channel,
+      runId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined,
+      sessionId: typeof parsed.flags.session === "string" ? parsed.flags.session : undefined,
+      to: typeof parsed.flags.to === "string" ? parsed.flags.to : undefined,
+      from: typeof parsed.flags.from === "string" ? parsed.flags.from : "cli",
+      payload: parseRelayPayload(payloadText)
+    });
+    await platform?.writeAudit({ action: "relay.sent", target: message.id, runId: message.runId, actor: "cli", metadata: { channel: message.channel, type: message.type, to: message.to } });
+    io.stdout(JSON.stringify(message, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "list") {
+    const messages = await mailbox.list({
+      channel: typeof parsed.flags.channel === "string" ? parsed.flags.channel : undefined,
+      status: typeof parsed.flags.status === "string" ? (parsed.flags.status as never) : undefined,
+      runId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined,
+      limit: Number(parsed.flags.limit ?? 50)
+    });
+    io.stdout(JSON.stringify(messages, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "deliver" || subcommand === "ack" || subcommand === "fail" || subcommand === "cancel") {
+    const id = parsed.positionals[0];
+    if (!id) {
+      await platform?.close();
+      throw new Error("Usage: agentbase relay deliver|ack|fail|cancel <message-id>");
+    }
+    const message =
+      subcommand === "deliver"
+        ? await mailbox.markDelivered(id)
+        : subcommand === "ack"
+          ? await mailbox.acknowledge(id)
+          : subcommand === "fail"
+            ? await mailbox.fail(id, typeof parsed.flags.error === "string" ? parsed.flags.error : "relay delivery failed")
+            : await mailbox.cancel(id, typeof parsed.flags.reason === "string" ? parsed.flags.reason : "relay message cancelled");
+    await platform?.writeAudit({ action: `relay.${message.status}`, target: message.id, runId: message.runId, actor: "cli", metadata: { channel: message.channel, type: message.type, error: message.error } });
+    io.stdout(JSON.stringify(message, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  await platform?.close();
+  throw new Error("Usage: agentbase relay send|list|deliver|ack|fail|cancel");
+}
+
 async function commandReplay(args: string[], io: CliIo): Promise<void> {
   const [subcommand, ...rest] = args;
   const parsed = parseFlags(rest);
@@ -1693,6 +1763,16 @@ function loadSearchProvider(config: AgentBaseConfig) {
 
 function csvFlag(value: string | boolean | undefined): string[] | undefined {
   return typeof value === "string" ? value.split(",").map((item) => item.trim()).filter(Boolean) : undefined;
+}
+
+function parseRelayPayload(value: string): Record<string, unknown> {
+  if (value.trim().startsWith("{")) {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  }
+  return { text: value };
 }
 
 function numberFlag(value: string | boolean | undefined): number | undefined {
@@ -2355,6 +2435,7 @@ function helpText(): string {
     "  agentbase wiki index|query|open [--cwd <dir>]",
     "  agentbase experience event|atom|lesson|list [--cwd <dir>]",
     "  agentbase capability draft|promote|list [--cwd <dir>]",
+    "  agentbase relay send|list|deliver|ack|fail|cancel [--cwd <dir>]",
     "  agentbase replay run|diff <run-id-or-jsonl> [--cwd <dir>]",
     "  agentbase eval run [--suite <file>] [--run <run-id-or-jsonl>] [--output <text>] [--cwd <dir>]",
     "  agentbase evolve propose|test|promote|rollback [--suite <file>] [--run <run-id-or-jsonl>] [--cwd <dir>]",

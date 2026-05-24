@@ -184,11 +184,22 @@ export type ContextItemSnapshot = {
   preview?: string;
 };
 
+export type ContextLayerSnapshot = {
+  id: string;
+  label: string;
+  purpose: string;
+  itemTypes: string[];
+  includedItems: number;
+  skippedItems: number;
+  tokenEstimate?: number;
+};
+
 export type ContextSnapshot = {
   messageCount: number;
   tokenEstimate: number;
   stablePrefixHash?: string;
   items: ContextItemSnapshot[];
+  layers?: ContextLayerSnapshot[];
 };
 
 export type ContextPrepareInput = {
@@ -489,9 +500,43 @@ export type ToolsetManifest = {
   entry?: string;
 };
 
+export type SpecialistTrigger = {
+  keywords?: string[];
+  taskTypes?: string[];
+  description?: string;
+};
+
+export type SpecialistResultContract = {
+  format?: string;
+  schema?: JsonSchema;
+  examples?: string[];
+};
+
+export type SpecialistManifest = {
+  name: string;
+  role: string;
+  trigger: SpecialistTrigger;
+  handoffTo?: string[];
+  confidence?: number;
+  needsFreshInfo?: boolean;
+  riskFlags?: string[];
+  result?: SpecialistResultContract;
+  metadata?: Record<string, unknown>;
+};
+
+export type SpecialistHandoffDecision = {
+  from?: string;
+  to: string;
+  confidence: number;
+  reason: string;
+  needsFreshInfo?: boolean;
+  riskFlags?: string[];
+};
+
 export type AgentSpec = Agent & {
   role?: string;
   handoffDescription?: string;
+  specialist?: SpecialistManifest;
 };
 
 export type TaskSpec = {
@@ -531,6 +576,40 @@ export type WorkflowResumeState = {
 
 export type WorkflowExecutor = {
   execute(workflow: WorkflowSpec, input?: { runId?: string; sessionId?: string; signal?: AbortSignal; resume?: boolean; resumeState?: WorkflowResumeState; maxParallelTasks?: number }): Promise<WorkflowExecutionResult>;
+};
+
+export type RelayMessageStatus = "queued" | "delivered" | "acknowledged" | "failed" | "cancelled";
+
+export type RelayMessage = {
+  id: string;
+  channel: string;
+  type: "run" | "team" | "approval" | "export" | "eval" | "browser" | "external" | string;
+  payload: Record<string, unknown>;
+  status: RelayMessageStatus;
+  runId?: string;
+  sessionId?: string;
+  to?: string;
+  from?: string;
+  attempts: number;
+  availableAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveredAt?: string;
+  acknowledgedAt?: string;
+  failedAt?: string;
+  cancelledAt?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type RelayMailbox = {
+  send(message: Omit<RelayMessage, "id" | "status" | "attempts" | "createdAt" | "updatedAt"> & Partial<Pick<RelayMessage, "id" | "status" | "attempts" | "createdAt" | "updatedAt">>): Promise<RelayMessage>;
+  list(filter?: { channel?: string; status?: RelayMessageStatus; runId?: string; limit?: number }): Promise<RelayMessage[]>;
+  get(id: string): Promise<RelayMessage | undefined>;
+  markDelivered(id: string): Promise<RelayMessage>;
+  acknowledge(id: string): Promise<RelayMessage>;
+  fail(id: string, error: string): Promise<RelayMessage>;
+  cancel(id: string, reason?: string): Promise<RelayMessage>;
 };
 
 export type CapabilityDraft = {

@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig, writeConfigFile } from "@agentbase/config";
 import { SqlitePlatformStore } from "@agentbase/stores-sqlite";
-import { startAgentBaseServer } from "./index";
+import { createLocalRuntimeSecurity, startAgentBaseServer } from "./index";
 
 describe("server", () => {
   it("serves runs from sqlite with optional token auth", async () => {
@@ -161,18 +161,46 @@ describe("server", () => {
       expect(await replayDiff.json()).toEqual(expect.any(Object));
       const conformanceReports = await fetch(`${server.url}/api/conformance/reports`, { headers: { authorization: "Bearer secret" } });
       expect(await conformanceReports.json()).toEqual(expect.any(Array));
+      const relay = await fetch(`${server.url}/api/relay`, {
+        method: "POST",
+        headers: { authorization: "Bearer secret", "content-type": "application/json" },
+        body: JSON.stringify({ channel: "run", type: "run", runId: "run_1", payload: { prompt: "summarize" } })
+      });
+      const relayMessage = (await relay.json()) as { id: string };
+      const relayAck = await fetch(`${server.url}/api/relay/${relayMessage.id}/ack`, { method: "POST", headers: { authorization: "Bearer secret" } });
+      expect(await relayAck.json()).toEqual(expect.objectContaining({ status: "acknowledged" }));
+      const relayList = await fetch(`${server.url}/api/relay?status=acknowledged`, { headers: { authorization: "Bearer secret" } });
+      expect(await relayList.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: relayMessage.id })]));
       const audit = await fetch(`${server.url}/api/audit`, { headers: { authorization: "Bearer secret" } });
       expect(await audit.json()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ action: "policy.updated" }),
           expect.objectContaining({ action: "toolset.enabled" }),
           expect.objectContaining({ action: "guardrail.scanned" }),
-          expect.objectContaining({ action: "export.completed" })
+          expect.objectContaining({ action: "export.completed" }),
+          expect.objectContaining({ action: "relay.acknowledged" })
         ])
       );
     } finally {
       await server.close();
       await new Promise<void>((resolve, reject) => receiver.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+
+  it("creates per-launch local runtime security with injected auth headers", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "agentbase-secure-server-"));
+    const security = createLocalRuntimeSecurity({ tokenBytes: 16 });
+    const server = await startAgentBaseServer({ sqliteFile: path.join(dir, "agentbase.sqlite"), runtimeSecurity: security });
+    try {
+      const unauthorized = await fetch(`${server.url}/health`);
+      expect(unauthorized.status).toBe(401);
+      const authorized = await fetch(`${server.url}/health`, { headers: security.authHeaders });
+      expect(await authorized.json()).toEqual(expect.objectContaining({ ok: true }));
+      expect(security.port).toBe(0);
+      expect(security.tokenHash).not.toBe(security.token);
+      expect(server.authHeaders?.authorization).toBe(`Bearer ${security.token}`);
+    } finally {
+      await server.close();
     }
   });
 });

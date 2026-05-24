@@ -33,6 +33,7 @@
     "@agentbase/provider-litellm": "workspace:*",
     "@agentbase/provider-ollama": "workspace:*",
     "@agentbase/provider-openai-compatible": "workspace:*",
+    "@agentbase/relay": "workspace:*",
     "@agentbase/replay": "workspace:*",
     "@agentbase/server": "workspace:*",
     "@agentbase/studio": "workspace:*",

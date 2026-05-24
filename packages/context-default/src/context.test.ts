@@ -28,6 +28,7 @@ describe("createDefaultContextManager", () => {
 
     expect(prepared.messages[0].role).toBe("system");
     expect(prepared.snapshot.stablePrefixHash).toBeTruthy();
+    expect(prepared.snapshot.layers?.map((layer) => layer.id)).toEqual(expect.arrayContaining(["stable-prefix", "dynamic-suffix"]));
     expect(JSON.stringify(prepared.messages)).toContain("truncated");
   });
 
@@ -94,5 +95,6 @@ describe("createDefaultContextManager", () => {
     expect(rendered).toContain("Pinned memory");
     expect(rendered).toContain("Wiki hits");
     expect(prepared.snapshot.items.map((item) => item.type)).toEqual(expect.arrayContaining(["pinned_memory", "wiki"]));
+    expect(prepared.snapshot.layers).toEqual(expect.arrayContaining([expect.objectContaining({ id: "memory", includedItems: expect.any(Number) }), expect.objectContaining({ id: "knowledge", includedItems: expect.any(Number) })]));
   });
 });

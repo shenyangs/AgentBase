@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMockModelProvider, createRuntime, type ApprovalDecision, type ApprovalRequest, type ApprovalStore, type ContextManager, type RuntimeEvent, type TraceStore } from "@agentbase/core";
-import { createOrchestrationPlan, createRuntimeWorkflowExecutor, createWorkflowExecutor, defaultAgentSpecs } from "./index";
+import { createOrchestrationPlan, createRuntimeWorkflowExecutor, createWorkflowExecutor, defaultAgentSpecs, selectSpecialist, validateSpecialistManifest } from "./index";
 
 function memoryTraceStore(events: RuntimeEvent[]): TraceStore {
   return {
@@ -68,6 +68,16 @@ describe("orchestrator", () => {
     });
     expect(plan.handoffs[0].from).toBe("researcher");
     expect(plan.handoffs[0].to).toBe("coder");
+  });
+
+  it("selects specialists from manifest triggers", () => {
+    const agents = defaultAgentSpecs();
+    const selected = selectSpecialist(agents, { input: "research fresh evidence and cite sources" });
+    expect(selected?.agent.name).toBe("researcher");
+    expect(selected?.decision.needsFreshInfo).toBe(true);
+    expect(validateSpecialistManifest(selected!.agent.specialist!)).toEqual([]);
+    const plan = createOrchestrationPlan({ name: "auto-specialist", agents, tasks: [{ id: "research", input: "research fresh evidence and cite sources" }] });
+    expect(plan.assignments[0].agent.name).toBe("researcher");
   });
 
   it("executes flow tasks through a runner", async () => {

@@ -1,4 +1,19 @@
-import { createId, type AgentSpec, type Handoff, type RunState, type Runtime, type RuntimeEvent, type TaskSpec, type TraceStore, type WorkflowExecutionResult, type WorkflowExecutor, type WorkflowResumeState, type WorkflowSpec } from "@agentbase/core";
+import {
+  createId,
+  type AgentSpec,
+  type Handoff,
+  type RunState,
+  type Runtime,
+  type RuntimeEvent,
+  type SpecialistHandoffDecision,
+  type SpecialistManifest,
+  type TaskSpec,
+  type TraceStore,
+  type WorkflowExecutionResult,
+  type WorkflowExecutor,
+  type WorkflowResumeState,
+  type WorkflowSpec
+} from "@agentbase/core";
 
 export type BlackboardEntry = {
   id: string;
@@ -37,13 +52,17 @@ export function createOrchestrationPlan(workflow: WorkflowSpec): OrchestrationPl
   if (!fallback) {
     throw new Error("Workflow requires at least one agent");
   }
-  const assignments = workflow.tasks.map(({ agent, ...task }) => ({ ...task, requestedAgent: agent, agent: agent ? agents.get(agent) ?? fallback : fallback }));
+  const assignments = workflow.tasks.map(({ agent, ...task }) => {
+    const selected = agent ? agents.get(agent) ?? fallback : selectSpecialist(workflow.agents, task)?.agent ?? fallback;
+    return { ...task, requestedAgent: agent, agent: selected };
+  });
   const handoffs: Handoff[] = [];
   for (const task of assignments) {
     for (const dep of task.dependsOn ?? []) {
       const from = assignments.find((candidate) => candidate.id === dep)?.agent.name;
       if (from && from !== task.agent.name) {
-        handoffs.push({ from, to: task.agent.name, reason: `Task ${task.id} depends on ${dep}`, payload: { taskId: task.id, dependsOn: dep } });
+        const decision = specialistHandoffDecision(task.agent, `Task ${task.id} depends on ${dep}`, from);
+        handoffs.push({ from, to: task.agent.name, reason: decision.reason, payload: { taskId: task.id, dependsOn: dep, specialist: decision } });
       }
     }
   }
@@ -52,13 +71,64 @@ export function createOrchestrationPlan(workflow: WorkflowSpec): OrchestrationPl
 
 export function defaultAgentSpecs(): AgentSpec[] {
   return [
-    { name: "supervisor", role: "supervisor", instructions: "Coordinate agents, assign tasks, and synthesize final output." },
-    { name: "planner", role: "planner", instructions: "Break goals into concrete steps and acceptance criteria." },
-    { name: "researcher", role: "researcher", instructions: "Gather evidence and cite uncertainty." },
-    { name: "coder", role: "coder", instructions: "Implement scoped code changes and report changed files." },
-    { name: "critic", role: "critic", instructions: "Review results for bugs, risks, and missing tests." },
-    { name: "memory-curator", role: "memory-curator", instructions: "Promote durable lessons into memory after evidence appears." }
+    withSpecialist({ name: "supervisor", role: "supervisor", instructions: "Coordinate agents, assign tasks, and synthesize final output." }, ["coordinate", "supervise", "synthesize"]),
+    withSpecialist({ name: "planner", role: "planner", instructions: "Break goals into concrete steps and acceptance criteria." }, ["plan", "steps", "roadmap"]),
+    withSpecialist({ name: "researcher", role: "researcher", instructions: "Gather evidence and cite uncertainty." }, ["research", "evidence", "source", "search"], { needsFreshInfo: true }),
+    withSpecialist({ name: "coder", role: "coder", instructions: "Implement scoped code changes and report changed files." }, ["code", "implement", "fix", "test"]),
+    withSpecialist({ name: "critic", role: "critic", instructions: "Review results for bugs, risks, and missing tests." }, ["review", "critic", "risk", "bug"]),
+    withSpecialist({ name: "memory-curator", role: "memory-curator", instructions: "Promote durable lessons into memory after evidence appears." }, ["memory", "lesson", "curate", "promote"])
   ];
+}
+
+export function validateSpecialistManifest(manifest: SpecialistManifest): Array<{ path: string; message: string }> {
+  const issues: Array<{ path: string; message: string }> = [];
+  if (!manifest.name) issues.push({ path: "name", message: "specialist name is required" });
+  if (!manifest.role) issues.push({ path: "role", message: "specialist role is required" });
+  if (!manifest.trigger || (!manifest.trigger.description && !manifest.trigger.keywords?.length && !manifest.trigger.taskTypes?.length)) {
+    issues.push({ path: "trigger", message: "specialist trigger must include description, keywords, or taskTypes" });
+  }
+  if (manifest.confidence !== undefined && (manifest.confidence < 0 || manifest.confidence > 1)) {
+    issues.push({ path: "confidence", message: "specialist confidence must be between 0 and 1" });
+  }
+  return issues;
+}
+
+export function specialistManifestFromAgent(agent: AgentSpec): SpecialistManifest {
+  return (
+    agent.specialist ?? {
+      name: agent.name,
+      role: agent.role ?? agent.name,
+      trigger: {
+        keywords: [agent.role ?? agent.name],
+        description: agent.handoffDescription ?? agent.instructions.slice(0, 240)
+      },
+      confidence: 0.5
+    }
+  );
+}
+
+export function selectSpecialist(agents: AgentSpec[], task: Pick<TaskSpec, "input" | "metadata">): { agent: AgentSpec; decision: SpecialistHandoffDecision } | undefined {
+  const scored = agents
+    .map((agent) => {
+      const manifest = specialistManifestFromAgent(agent);
+      const score = scoreSpecialist(manifest, task);
+      return { agent, manifest, score };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score);
+  const best = scored[0];
+  if (!best) return undefined;
+  const confidence = Math.min(1, Math.max(best.manifest.confidence ?? 0.5, best.score));
+  return {
+    agent: best.agent,
+    decision: {
+      to: best.agent.name,
+      confidence,
+      reason: `Specialist ${best.agent.name} matched task trigger`,
+      needsFreshInfo: best.manifest.needsFreshInfo,
+      riskFlags: best.manifest.riskFlags
+    }
+  };
 }
 
 export function createWorkflowExecutor(options: { runTask: WorkflowTaskRunner; maxParallelTasks?: number; shouldCancel?: () => Promise<boolean> }): WorkflowExecutor {
@@ -394,6 +464,45 @@ function taskStatusFromRun(status: string): "completed" | "failed" | "waiting_ap
     return status;
   }
   return "failed";
+}
+
+function withSpecialist(agent: AgentSpec, keywords: string[], options: Partial<Pick<SpecialistManifest, "needsFreshInfo" | "riskFlags" | "result">> = {}): AgentSpec {
+  return {
+    ...agent,
+    specialist: {
+      name: agent.name,
+      role: agent.role ?? agent.name,
+      trigger: {
+        keywords,
+        taskTypes: [agent.role ?? agent.name],
+        description: agent.handoffDescription ?? agent.instructions
+      },
+      confidence: 0.65,
+      ...options
+    }
+  };
+}
+
+function specialistHandoffDecision(agent: AgentSpec, reason: string, from?: string): SpecialistHandoffDecision {
+  const manifest = specialistManifestFromAgent(agent);
+  return {
+    from,
+    to: agent.name,
+    confidence: manifest.confidence ?? 0.5,
+    reason,
+    needsFreshInfo: manifest.needsFreshInfo,
+    riskFlags: manifest.riskFlags
+  };
+}
+
+function scoreSpecialist(manifest: SpecialistManifest, task: Pick<TaskSpec, "input" | "metadata">): number {
+  const haystack = `${task.input} ${JSON.stringify(task.metadata ?? {})}`.toLowerCase();
+  const keywords = manifest.trigger.keywords ?? [];
+  const taskTypes = manifest.trigger.taskTypes ?? [];
+  const keywordScore = keywords.reduce((score, keyword) => score + (keyword && haystack.includes(keyword.toLowerCase()) ? 0.35 : 0), 0);
+  const taskTypeScore = taskTypes.reduce((score, taskType) => score + (taskType && haystack.includes(taskType.toLowerCase()) ? 0.25 : 0), 0);
+  const descriptionScore = manifest.trigger.description && haystack.includes(manifest.role.toLowerCase()) ? 0.2 : 0;
+  return Math.min(1, keywordScore + taskTypeScore + descriptionScore);
 }
 
 function childRunIdFor(parentRunId: string, taskId: string): string {

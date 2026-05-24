@@ -94,6 +94,9 @@ importers:
       '@agentbase/provider-openai-compatible':
         specifier: workspace:*
         version: link:../provider-openai-compatible
+      '@agentbase/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@agentbase/replay':
         specifier: workspace:*
         version: link:../replay
@@ -241,6 +244,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/relay:
+    dependencies:
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/replay:
     dependencies:
       '@agentbase/core':
@@ -258,6 +267,9 @@ importers:
       '@agentbase/patterns':
         specifier: workspace:*
         version: link:../patterns
+      '@agentbase/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@agentbase/replay':
         specifier: workspace:*
         version: link:../replay

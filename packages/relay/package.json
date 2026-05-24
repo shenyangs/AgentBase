@@ -1,5 +1,5 @@
 {
-  "name": "@agentbase/server",
+  "name": "@agentbase/relay",
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
@@ -12,13 +12,7 @@
     }
   },
   "dependencies": {
-    "@agentbase/config": "workspace:*",
-    "@agentbase/guardrails": "workspace:*",
-    "@agentbase/patterns": "workspace:*",
-    "@agentbase/relay": "workspace:*",
-    "@agentbase/replay": "workspace:*",
-    "@agentbase/stores-sqlite": "workspace:*",
-    "@agentbase/trace": "workspace:*"
+    "@agentbase/core": "workspace:*"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean --platform node",

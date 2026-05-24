@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -16,13 +17,27 @@ import {
 } from "@agentbase/config";
 import { scanRuntimeEvents, scanTextForGuardrails, summarizeGuardrailResults } from "@agentbase/guardrails";
 import { describeReferencePattern, getReferencePattern, listPatternRunReports, loadReferencePatternCatalog } from "@agentbase/patterns";
+import { JsonRelayMailbox, relayMailboxFile } from "@agentbase/relay";
 import { diffReplay } from "@agentbase/replay";
 import { SqlitePlatformStore } from "@agentbase/stores-sqlite";
 import { serializeTraceExport, type TraceExportFormat } from "@agentbase/trace";
 
 export type AgentBaseServer = {
   url: string;
+  authHeaders?: Record<string, string>;
   close(): Promise<void>;
+};
+
+export type LocalRuntimeSecurity = {
+  bindHost: string;
+  port: number;
+  token: string;
+  tokenHash: string;
+  headerName: string;
+  authHeaders: Record<string, string>;
+  corsAllowlist: string[];
+  tokenKind: "per-launch";
+  udsPath?: string;
 };
 
 export type AgentBaseServerOptions = {
@@ -31,19 +46,42 @@ export type AgentBaseServerOptions = {
   port?: number;
   token?: string;
   corsAllowlist?: string[];
+  runtimeSecurity?: LocalRuntimeSecurity;
 };
+
+export function createLocalRuntimeSecurity(options: { tokenBytes?: number; headerName?: string; bindHost?: string; port?: number; corsAllowlist?: string[]; udsPath?: string } = {}): LocalRuntimeSecurity {
+  const token = randomBytes(options.tokenBytes ?? 32).toString("base64url");
+  const headerName = options.headerName ?? "x-agentbase-runtime-token";
+  return {
+    bindHost: options.bindHost ?? "127.0.0.1",
+    port: options.port ?? 0,
+    token,
+    tokenHash: createHash("sha256").update(token).digest("hex"),
+    headerName,
+    authHeaders: {
+      authorization: `Bearer ${token}`,
+      [headerName]: token
+    },
+    corsAllowlist: options.corsAllowlist ?? ["http://127.0.0.1", "http://localhost"],
+    tokenKind: "per-launch",
+    udsPath: options.udsPath
+  };
+}
 
 export async function startAgentBaseServer(options: AgentBaseServerOptions): Promise<AgentBaseServer> {
   const store = new SqlitePlatformStore({ file: path.resolve(options.sqliteFile) });
+  const runtimeSecurity = options.runtimeSecurity;
+  const corsAllowlist = options.corsAllowlist ?? runtimeSecurity?.corsAllowlist;
+  const token = runtimeSecurity?.token ?? options.token;
   const server = createServer(async (req, res) => {
     try {
-      applyCors(req, res, options.corsAllowlist);
+      applyCors(req, res, corsAllowlist);
       if (req.method === "OPTIONS") {
         res.statusCode = 204;
         res.end();
         return;
       }
-      if (!authorize(req, options.token)) {
+      if (!authorize(req, token, runtimeSecurity)) {
         sendJson(res, 401, { error: "unauthorized" });
         return;
       }
@@ -366,6 +404,58 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
         return;
       }
 
+      if (url.pathname === "/api/relay" && req.method === "GET") {
+        const mailbox = relayMailboxForServer(options);
+        sendJson(
+          res,
+          200,
+          await mailbox.list({
+            channel: url.searchParams.get("channel") ?? undefined,
+            status: (url.searchParams.get("status") as never) ?? undefined,
+            runId: url.searchParams.get("runId") ?? undefined,
+            limit: numberParam(url, "limit") ?? 100
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === "/api/relay" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const mailbox = relayMailboxForServer(options);
+        const message = await mailbox.send({
+          channel: requiredString(body, "channel"),
+          type: stringField(body, "type") ?? requiredString(body, "channel"),
+          payload: isRecord(body.payload) ? body.payload : {},
+          runId: stringField(body, "runId"),
+          sessionId: stringField(body, "sessionId"),
+          to: stringField(body, "to"),
+          from: stringField(body, "from") ?? "server",
+          metadata: isRecord(body.metadata) ? body.metadata : undefined
+        });
+        await store.writeAudit({ action: "relay.sent", target: message.id, runId: message.runId, actor: "server", metadata: { channel: message.channel, type: message.type, to: message.to } });
+        sendJson(res, 200, message);
+        return;
+      }
+
+      const relayTransition = url.pathname.match(/^\/api\/relay\/([^/]+)\/(deliver|ack|fail|cancel)$/);
+      if (relayTransition && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const mailbox = relayMailboxForServer(options);
+        const id = decodeURIComponent(relayTransition[1]);
+        const action = relayTransition[2];
+        const message =
+          action === "deliver"
+            ? await mailbox.markDelivered(id)
+            : action === "ack"
+              ? await mailbox.acknowledge(id)
+              : action === "fail"
+                ? await mailbox.fail(id, stringField(body, "error") ?? "relay delivery failed")
+                : await mailbox.cancel(id, stringField(body, "reason") ?? "relay message cancelled");
+        await store.writeAudit({ action: `relay.${message.status}`, target: message.id, runId: message.runId, actor: "server", metadata: { channel: message.channel, type: message.type, error: message.error } });
+        sendJson(res, 200, message);
+        return;
+      }
+
       if (url.pathname === "/api/code/search") {
         const q = url.searchParams.get("q") ?? "";
         sendJson(res, 200, q ? await store.searchCodeSymbols(q, { limit: numberParam(url, "limit") ?? 50 }) : await store.listCodeFiles({ limit: numberParam(url, "limit") ?? 100 }));
@@ -455,10 +545,13 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
     }
   });
 
-  await new Promise<void>((resolve) => server.listen(options.port ?? 0, resolve));
+  await new Promise<void>((resolve) =>
+    runtimeSecurity ? server.listen({ port: options.port ?? runtimeSecurity.port, host: runtimeSecurity.bindHost }, resolve) : server.listen(options.port ?? 0, resolve)
+  );
   const address = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${address.port}`,
+    authHeaders: runtimeSecurity?.authHeaders,
     close: () =>
       new Promise((resolve, reject) =>
         server.close(async (error) => {
@@ -469,11 +562,11 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
   };
 }
 
-function authorize(req: IncomingMessage, token?: string): boolean {
+function authorize(req: IncomingMessage, token?: string, runtimeSecurity?: LocalRuntimeSecurity): boolean {
   if (!token) {
     return true;
   }
-  return req.headers.authorization === `Bearer ${token}`;
+  return req.headers.authorization === `Bearer ${token}` || (runtimeSecurity ? req.headers[runtimeSecurity.headerName.toLowerCase()] === token : false);
 }
 
 function numberParam(url: URL, key: string): number | undefined {
@@ -549,6 +642,10 @@ async function requireConfig(options: AgentBaseServerOptions): Promise<AgentBase
 
 function workspaceRootForConfig(configFile: string | undefined): string | undefined {
   return configFile ? path.dirname(path.dirname(path.resolve(configFile))) : undefined;
+}
+
+function relayMailboxForServer(options: AgentBaseServerOptions): JsonRelayMailbox {
+  return new JsonRelayMailbox({ file: relayMailboxFile(workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile))) });
 }
 
 async function writeGovernance(store: SqlitePlatformStore, type: string, data: Record<string, unknown>, actor: string): Promise<void> {
