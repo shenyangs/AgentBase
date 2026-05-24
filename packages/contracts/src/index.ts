@@ -1,4 +1,14 @@
-import type { ModelProvider, RuntimeEvent, Tool, ToolResultEnvelope, WorkflowExecutionResult } from "@agentbase/core";
+import type {
+  ContextSnapshot,
+  ModelProvider,
+  RelayMailbox,
+  RelayMessage,
+  RuntimeEvent,
+  SpecialistManifest,
+  Tool,
+  ToolResultEnvelope,
+  WorkflowExecutionResult
+} from "@agentbase/core";
 
 export type ContractSeverity = "error" | "warning";
 
@@ -129,6 +139,186 @@ export function validateWorkflowResultContract(result: WorkflowExecutionResult, 
   return report(name, issues);
 }
 
+export function validateSpecialistManifestContract(manifest: SpecialistManifest, name = `specialist:${manifest?.name ?? "<missing>"}`): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+
+  if (!isRecord(manifest)) {
+    return report(name, [{ path: "$", message: "specialist manifest must be an object", severity: "error" }]);
+  }
+  if (!nonEmptyString(manifest.name)) error("name", "manifest.name must be a non-empty string");
+  if (!nonEmptyString(manifest.role)) error("role", "manifest.role must be a non-empty string");
+  if (!isRecord(manifest.trigger)) {
+    error("trigger", "manifest.trigger must be an object");
+  } else {
+    const hasKeywords = Array.isArray(manifest.trigger.keywords) && manifest.trigger.keywords.length > 0;
+    const hasTaskTypes = Array.isArray(manifest.trigger.taskTypes) && manifest.trigger.taskTypes.length > 0;
+    const hasDescription = nonEmptyString(manifest.trigger.description);
+    if (!hasKeywords && !hasTaskTypes && !hasDescription) error("trigger", "trigger must include keywords, taskTypes, or description");
+    if (manifest.trigger.keywords !== undefined && (!Array.isArray(manifest.trigger.keywords) || !manifest.trigger.keywords.every(nonEmptyString))) {
+      error("trigger.keywords", "trigger.keywords must be an array of non-empty strings");
+    }
+    if (manifest.trigger.taskTypes !== undefined && (!Array.isArray(manifest.trigger.taskTypes) || !manifest.trigger.taskTypes.every(nonEmptyString))) {
+      error("trigger.taskTypes", "trigger.taskTypes must be an array of non-empty strings");
+    }
+  }
+  if (manifest.handoffTo !== undefined && (!Array.isArray(manifest.handoffTo) || !manifest.handoffTo.every(nonEmptyString))) {
+    error("handoffTo", "handoffTo must be an array of non-empty strings");
+  }
+  if (manifest.confidence !== undefined && (typeof manifest.confidence !== "number" || manifest.confidence < 0 || manifest.confidence > 1)) {
+    error("confidence", "confidence must be a number between 0 and 1");
+  }
+  if (manifest.needsFreshInfo !== undefined && typeof manifest.needsFreshInfo !== "boolean") {
+    error("needsFreshInfo", "needsFreshInfo must be boolean when present");
+  }
+  if (manifest.riskFlags !== undefined && (!Array.isArray(manifest.riskFlags) || !manifest.riskFlags.every(nonEmptyString))) {
+    error("riskFlags", "riskFlags must be an array of non-empty strings");
+  }
+  if (manifest.result !== undefined) {
+    if (!isRecord(manifest.result)) {
+      error("result", "result must be an object when present");
+    } else {
+      if (manifest.result.format !== undefined && !nonEmptyString(manifest.result.format)) error("result.format", "result.format must be a non-empty string when present");
+      if (manifest.result.schema !== undefined && !isRecord(manifest.result.schema)) error("result.schema", "result.schema must be a JSON schema object when present");
+      if (manifest.result.examples !== undefined && (!Array.isArray(manifest.result.examples) || !manifest.result.examples.every(nonEmptyString))) {
+        error("result.examples", "result.examples must be an array of non-empty strings when present");
+      }
+    }
+  }
+
+  return report(name, issues);
+}
+
+export function validateContextSnapshotContract(snapshot: ContextSnapshot, name = "context-snapshot"): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+
+  if (!isRecord(snapshot)) {
+    return report(name, [{ path: "$", message: "context snapshot must be an object", severity: "error" }]);
+  }
+  if (!nonNegativeNumber(snapshot.messageCount)) error("messageCount", "messageCount must be a non-negative number");
+  if (!nonNegativeNumber(snapshot.tokenEstimate)) error("tokenEstimate", "tokenEstimate must be a non-negative number");
+  if (!Array.isArray(snapshot.items)) {
+    error("items", "items must be an array");
+  } else {
+    for (const [index, item] of snapshot.items.entries()) {
+      if (!nonEmptyString(item.id)) error(`items[${index}].id`, "item.id must be a non-empty string");
+      if (!nonEmptyString(item.type)) error(`items[${index}].type`, "item.type must be a non-empty string");
+      if (typeof item.included !== "boolean") error(`items[${index}].included`, "item.included must be boolean");
+      if (!nonEmptyString(item.reason)) error(`items[${index}].reason`, "item.reason must be a non-empty string");
+    }
+  }
+  if (!Array.isArray(snapshot.layers)) {
+    error("layers", "layers must be an array for budget-planned context");
+  } else {
+    const layerIds = new Set(snapshot.layers.map((layer) => layer.id));
+    if (!layerIds.has("stable-prefix")) error("layers", "layers must include stable-prefix");
+    if (!layerIds.has("dynamic-suffix")) error("layers", "layers must include dynamic-suffix");
+    for (const [index, layer] of snapshot.layers.entries()) {
+      if (!nonEmptyString(layer.id)) error(`layers[${index}].id`, "layer.id must be a non-empty string");
+      if (!nonEmptyString(layer.label)) error(`layers[${index}].label`, "layer.label must be a non-empty string");
+      if (!nonEmptyString(layer.purpose)) error(`layers[${index}].purpose`, "layer.purpose must be a non-empty string");
+      if (!Array.isArray(layer.itemTypes) || !layer.itemTypes.every(nonEmptyString)) error(`layers[${index}].itemTypes`, "layer.itemTypes must be an array of non-empty strings");
+      if (!nonNegativeNumber(layer.includedItems)) error(`layers[${index}].includedItems`, "includedItems must be a non-negative number");
+      if (!nonNegativeNumber(layer.skippedItems)) error(`layers[${index}].skippedItems`, "skippedItems must be a non-negative number");
+      if (layer.tokenEstimate !== undefined && !nonNegativeNumber(layer.tokenEstimate)) error(`layers[${index}].tokenEstimate`, "tokenEstimate must be a non-negative number when present");
+    }
+  }
+
+  return report(name, issues);
+}
+
+export function validateRelayMessageContract(message: RelayMessage, name = `relay:${message?.id ?? "<missing>"}`): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+
+  if (!isRecord(message)) {
+    return report(name, [{ path: "$", message: "relay message must be an object", severity: "error" }]);
+  }
+  if (!nonEmptyString(message.id)) error("id", "message.id must be a non-empty string");
+  if (!nonEmptyString(message.channel)) error("channel", "message.channel must be a non-empty string");
+  if (!nonEmptyString(message.type)) error("type", "message.type must be a non-empty string");
+  if (!isRecord(message.payload)) error("payload", "message.payload must be an object");
+  if (!["queued", "delivered", "acknowledged", "failed", "cancelled"].includes(String(message.status))) error("status", "message.status is invalid");
+  if (!nonNegativeNumber(message.attempts)) error("attempts", "attempts must be a non-negative number");
+  if (!isIsoDate(message.createdAt)) error("createdAt", "createdAt must be an ISO timestamp string");
+  if (!isIsoDate(message.updatedAt)) error("updatedAt", "updatedAt must be an ISO timestamp string");
+  if (message.status === "delivered" && !isIsoDate(message.deliveredAt)) error("deliveredAt", "delivered messages must include deliveredAt");
+  if (message.status === "acknowledged" && !isIsoDate(message.acknowledgedAt)) error("acknowledgedAt", "acknowledged messages must include acknowledgedAt");
+  if (message.status === "failed") {
+    if (!isIsoDate(message.failedAt)) error("failedAt", "failed messages must include failedAt");
+    if (!nonEmptyString(message.error)) error("error", "failed messages must include error");
+  }
+  if (message.status === "cancelled" && !isIsoDate(message.cancelledAt)) error("cancelledAt", "cancelled messages must include cancelledAt");
+
+  return report(name, issues);
+}
+
+export async function validateRelayMailboxContract(mailbox: RelayMailbox, name = "relay-mailbox"): Promise<ContractReport> {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+
+  if (!isRecord(mailbox)) {
+    return report(name, [{ path: "$", message: "relay mailbox must be an object", severity: "error" }]);
+  }
+  for (const method of ["send", "list", "get", "markDelivered", "acknowledge", "fail", "cancel"]) {
+    if (typeof mailbox[method as keyof RelayMailbox] !== "function") error(method, `${method} must be a function`);
+  }
+  if (issues.length > 0) return report(name, issues);
+
+  try {
+    const queued = await mailbox.send({ channel: "contract", type: "external", payload: { ok: true }, to: "contract-target" });
+    appendNestedIssues(issues, validateRelayMessageContract(queued, `${name}.queued`));
+    if (queued.status !== "queued") error("send.status", "send must create queued messages");
+    const listed = await mailbox.list({ channel: "contract", status: "queued" });
+    if (!listed.some((message) => message.id === queued.id)) error("list", "list must return queued messages by channel/status");
+    const delivered = await mailbox.markDelivered(queued.id);
+    appendNestedIssues(issues, validateRelayMessageContract(delivered, `${name}.delivered`));
+    if (delivered.attempts < queued.attempts + 1) error("markDelivered.attempts", "markDelivered must increment attempts");
+    const acknowledged = await mailbox.acknowledge(queued.id);
+    appendNestedIssues(issues, validateRelayMessageContract(acknowledged, `${name}.acknowledged`));
+    const failed = await mailbox.fail((await mailbox.send({ channel: "contract", type: "external", payload: { fail: true } })).id, "contract failure");
+    appendNestedIssues(issues, validateRelayMessageContract(failed, `${name}.failed`));
+    const cancelled = await mailbox.cancel((await mailbox.send({ channel: "contract", type: "external", payload: { cancel: true } })).id, "contract cancellation");
+    appendNestedIssues(issues, validateRelayMessageContract(cancelled, `${name}.cancelled`));
+  } catch (cause) {
+    error("$", cause instanceof Error ? cause.message : String(cause));
+  }
+
+  return report(name, issues);
+}
+
+export function validateLocalRuntimeSecurityContract(value: unknown, name = "local-runtime-security"): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+
+  if (!isRecord(value)) {
+    return report(name, [{ path: "$", message: "local runtime security must be an object", severity: "error" }]);
+  }
+  const token = value.token;
+  const headerName = value.headerName;
+  if (!["127.0.0.1", "localhost", "::1"].includes(String(value.bindHost)) && !nonEmptyString(value.udsPath)) {
+    error("bindHost", "bindHost must be loopback unless udsPath is provided");
+  }
+  if (!Number.isInteger(value.port) || Number(value.port) < 0 || Number(value.port) > 65535) error("port", "port must be an integer between 0 and 65535");
+  if (!nonEmptyString(token) || String(token).length < 16) error("token", "token must be a generated per-launch secret");
+  if (!/^[a-f0-9]{64}$/i.test(String(value.tokenHash))) error("tokenHash", "tokenHash must be a SHA-256 hex digest");
+  if (value.tokenHash === token) error("tokenHash", "tokenHash must not equal token");
+  if (!nonEmptyString(headerName) || /\s/.test(headerName)) error("headerName", "headerName must be a non-empty HTTP header name");
+  if (!isRecord(value.authHeaders)) {
+    error("authHeaders", "authHeaders must be an object");
+  } else {
+    if (value.authHeaders.authorization !== `Bearer ${token}`) error("authHeaders.authorization", "authorization header must contain the per-launch bearer token");
+    if (value.authHeaders[String(headerName)] !== token) error("authHeaders[headerName]", "custom auth header must contain the per-launch token");
+  }
+  if (!Array.isArray(value.corsAllowlist) || !value.corsAllowlist.every(nonEmptyString)) {
+    error("corsAllowlist", "corsAllowlist must be an array of origins");
+  }
+  if (value.tokenKind !== "per-launch") error("tokenKind", "tokenKind must be per-launch");
+
+  return report(name, issues);
+}
+
 export function runContractSuite(reports: ContractReport[]): ContractSuiteReport {
   return { ok: reports.every((entry) => entry.ok), reports };
 }
@@ -154,4 +344,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function nonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function appendNestedIssues(issues: ContractIssue[], nested: ContractReport): void {
+  for (const issue of nested.issues) {
+    issues.push({ ...issue, path: `${nested.name}.${issue.path}` });
+  }
 }

@@ -98,7 +98,7 @@ pnpm agentbase studio --cwd /tmp/agentbase-demo
 pnpm release:check
 ```
 
-`pnpm release:check` 会跑 build、contract tests、test、e2e、reference patterns 和 conformance。
+`pnpm release:check` 会跑 build、contract tests、test、e2e、reference patterns 和 conformance。Contract tests 会验证 tool/provider、tool-result envelope、workflow result、specialist manifest、context layers、relay mailbox 和 local runtime security。
 
 ## 如果你是小白，可以让 Codex 帮你拼一个 agent
 
@@ -282,6 +282,8 @@ Full release gate:
 ```bash
 pnpm release:check
 ```
+
+The release gate covers build, contract tests, unit tests, E2E smoke, reference patterns, and local-first conformance. Contract tests include tools/providers, tool-result envelopes, workflow results, specialist manifests, context layers, relay mailbox behavior, and local runtime security.
 
 ## Release Status
 

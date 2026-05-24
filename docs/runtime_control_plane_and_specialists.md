@@ -101,3 +101,16 @@ await fetch(`${server.url}/health`, { headers: security.authHeaders });
 ```
 
 The first version covers random local port, per-launch token, header injection, and redacted token hash. UDS and richer desktop pairing can build on this without changing the public shape.
+
+## Contract Coverage
+
+These patterns are now part of the release gate through `pnpm contracts`.
+
+The contract pack validates:
+
+- relay message shape and mailbox transitions across queued, delivered, acknowledged, failed, and cancelled states;
+- specialist manifest trigger, handoff, freshness, risk, confidence, and result metadata;
+- context snapshots with stable prefix and dynamic suffix layers;
+- local runtime security objects with loopback binding, generated per-launch token, SHA-256 token hash, injected auth headers, and local CORS defaults.
+
+That makes the patterns reusable by downstream implementations: a custom mailbox, specialist router, context planner, or desktop server can be swapped in, but it has to preserve the same runtime contract.

@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { createMockModelProvider, type ToolResultEnvelope } from "@agentbase/core";
-import { assertContractReport, runContractSuite, validateProviderContract, validateToolContract, validateToolResultEnvelope, validateTraceContract, validateWorkflowResultContract } from "./index";
+import {
+  assertContractReport,
+  runContractSuite,
+  validateContextSnapshotContract,
+  validateLocalRuntimeSecurityContract,
+  validateProviderContract,
+  validateRelayMessageContract,
+  validateSpecialistManifestContract,
+  validateToolContract,
+  validateToolResultEnvelope,
+  validateTraceContract,
+  validateWorkflowResultContract
+} from "./index";
 
 describe("contract validators", () => {
   it("accepts stable provider, tool, envelope, trace, and workflow shapes", () => {
@@ -37,6 +49,50 @@ describe("contract validators", () => {
         status: "completed",
         assignments: [{ taskId: "task_1", agent: "agent", status: "completed", artifactRefs: ["artifact://1"] }],
         handoffs: []
+      }),
+      validateSpecialistManifestContract({
+        name: "researcher",
+        role: "researcher",
+        trigger: { keywords: ["research", "source"], description: "Find fresh evidence." },
+        confidence: 0.8,
+        needsFreshInfo: true,
+        riskFlags: ["untrusted-web"],
+        result: { format: "markdown" }
+      }),
+      validateContextSnapshotContract({
+        messageCount: 2,
+        tokenEstimate: 24,
+        items: [
+          { id: "stable-prefix", type: "stable_prefix", included: true, reason: "stable contract" },
+          { id: "message-1", type: "user", included: true, reason: "dynamic suffix" }
+        ],
+        layers: [
+          { id: "stable-prefix", label: "Stable Prefix", purpose: "stable context", itemTypes: ["stable_prefix"], includedItems: 1, skippedItems: 0, tokenEstimate: 10 },
+          { id: "dynamic-suffix", label: "Dynamic Suffix", purpose: "latest turn", itemTypes: ["user"], includedItems: 1, skippedItems: 0, tokenEstimate: 14 }
+        ]
+      }),
+      validateRelayMessageContract({
+        id: "relay_1",
+        channel: "contract",
+        type: "external",
+        payload: { ok: true },
+        status: "queued",
+        attempts: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }),
+      validateLocalRuntimeSecurityContract({
+        bindHost: "127.0.0.1",
+        port: 0,
+        token: "generated-contract-token",
+        tokenHash: "a".repeat(64),
+        headerName: "x-agentbase-runtime-token",
+        authHeaders: {
+          authorization: "Bearer generated-contract-token",
+          "x-agentbase-runtime-token": "generated-contract-token"
+        },
+        corsAllowlist: ["http://127.0.0.1", "http://localhost"],
+        tokenKind: "per-launch"
       })
     ]);
 
@@ -55,5 +111,17 @@ describe("contract validators", () => {
 
     expect(report.ok).toBe(false);
     expect(report.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["name", "description", "inputSchema.type"]));
+  });
+
+  it("rejects context snapshots without stable layers", () => {
+    const report = validateContextSnapshotContract({
+      messageCount: 1,
+      tokenEstimate: 10,
+      items: [{ id: "message-0", type: "user", included: true, reason: "input" }],
+      layers: [{ id: "dynamic-suffix", label: "Dynamic Suffix", purpose: "latest turn", itemTypes: ["user"], includedItems: 1, skippedItems: 0 }]
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.issues.map((issue) => issue.path)).toContain("layers");
   });
 });

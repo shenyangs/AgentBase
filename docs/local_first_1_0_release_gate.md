@@ -52,6 +52,7 @@ conformance gates.
   - approval decision/reuse before deterministic resume
   - workflow approval resume without rerunning completed child tasks
   - config mutation audit
+- Contract tests now cover not only tool/provider/envelope/workflow shape, but also specialist manifests, context snapshot layers, relay mailbox transitions, and local runtime security tokens.
 - Reference-pattern validation covering `repo-analyst`, `test-runner`, `research-agent`, `tool-designer`, and `memory-curator`.
 
 ## 1.0 Production Baseline In Place
@@ -69,6 +70,7 @@ conformance gates.
 - Specialist manifests let orchestrator agents advertise trigger, handoff, freshness, risk, and result contracts.
 - Context snapshots now expose named layers for stable prefix, memory, wiki/code, artifacts, working set, and dynamic suffix.
 - Local runtime security helper provides per-launch token, random local port, injected auth headers, and token hashing for desktop/server pairing.
+- These newly absorbed runtime patterns are wired into `pnpm contracts`, so future implementations must preserve the public shape and behavior rather than merely compile.
 - Observability export supports redacted JSONL, OpenTelemetry-ish, OpenInference/Phoenix-ish, and Langfuse-ish payloads from CLI and local server, plus HTTP push through configured export destinations.
 - CLI exposes `approval`, `config`, `policy`, `provider`, `patterns`, `tools`, `conformance`, `store`, `backup restore`, and the previous runtime/tool/memory/wiki/replay/eval commands.
 - Local server exposes health/readiness, config/provider/tool/policy control-plane APIs, runs, context snapshots, replay diff, conformance reports, sessions, approvals, guardrail scan/audit, artifacts, memory promotion, wiki, evals, code search, audit, store doctor/compact/prune/backup, export push, and trace export with token auth and response redaction.
