@@ -1,0 +1,12 @@
+id: repo-analyst-reference
+name: Repo analyst reference pattern
+cases:
+  - id: mock-summary-contract
+    input: summarize this repo
+    assertions:
+      - type: contains
+        value: Mock repo summary
+      - type: status_is
+        value: completed
+      - type: max_steps
+        value: 10

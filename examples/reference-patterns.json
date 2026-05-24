@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "id": "repo-analyst",
+      "title": "Repo Analyst",
+      "agent": "repo-analyst/agent.json",
+      "eval": "repo-analyst/eval.yaml",
+      "fixture": "../fixtures/small-repo",
+      "requiredToolsets": ["@agentbase/tools-fs", "@agentbase/tools-git", "@agentbase/code-index"],
+      "description": "Inspect a repository, build a grounded summary, and keep raw file contents behind tool-result refs."
+    },
+    {
+      "id": "test-runner",
+      "title": "Test Runner",
+      "agent": "test-runner/agent.json",
+      "eval": "test-runner/eval.yaml",
+      "fixture": "../fixtures/test-runner-repo",
+      "requiredToolsets": ["@agentbase/tools-fs", "@agentbase/tools-shell", "@agentbase/tools-git"],
+      "description": "Run project tests through policy-gated shell execution and produce concise failure diagnostics."
+    },
+    {
+      "id": "research-agent",
+      "title": "Research Agent",
+      "agent": "research-agent/agent.json",
+      "eval": "research-agent/eval.yaml",
+      "fixture": "../fixtures/research-corpus",
+      "requiredToolsets": ["@agentbase/tools-fs", "@agentbase/tools-web", "@agentbase/tools-http"],
+      "description": "Separate sourced evidence from synthesis so external content remains untrusted context."
+    },
+    {
+      "id": "tool-designer",
+      "title": "Tool Designer",
+      "agent": "tool-designer/agent.json",
+      "eval": "tool-designer/eval.yaml",
+      "fixture": "../fixtures/tool-design-request",
+      "requiredToolsets": ["@agentbase/tools-fs", "@agentbase/code-index"],
+      "description": "Turn a tool request into schema, permissions, risk, output envelope, trace, and tests."
+    },
+    {
+      "id": "memory-curator",
+      "title": "Memory Curator",
+      "agent": "memory-curator/agent.json",
+      "eval": "memory-curator/eval.yaml",
+      "fixture": "../fixtures/memory-workspace",
+      "requiredToolsets": ["@agentbase/tools-fs"],
+      "description": "Promote durable memory only when it is scoped, sourced, non-secret, and useful for future runs."
+    }
+  ]
+}

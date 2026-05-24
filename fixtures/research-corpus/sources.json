@@ -1,0 +1,12 @@
+[
+  {
+    "title": "Runtime contracts",
+    "url": "file://README.md",
+    "snippet": "Append-only traces and policy-first execution make local agents inspectable."
+  },
+  {
+    "title": "Context planning",
+    "url": "file://README.md#notes",
+    "snippet": "Context should be assembled as a budgeted plan, not a raw transcript dump."
+  }
+]

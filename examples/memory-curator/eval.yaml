@@ -1,0 +1,12 @@
+id: memory-curator-reference
+name: Memory curator reference pattern
+cases:
+  - id: conservative-memory-promotion
+    input: curate project memory
+    assertions:
+      - type: contains
+        value: Mock repo summary
+      - type: status_is
+        value: completed
+      - type: max_steps
+        value: 10

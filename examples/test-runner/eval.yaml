@@ -1,0 +1,12 @@
+id: test-runner-reference
+name: Test runner reference pattern
+cases:
+  - id: bounded-test-diagnostics
+    input: run tests
+    assertions:
+      - type: contains
+        value: Mock repo summary
+      - type: status_is
+        value: completed
+      - type: max_tool_calls
+        value: 5

@@ -1,0 +1,36 @@
+{
+  "name": "agentbase",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "agentbase": "node packages/cli/dist/index.js",
+    "build": "pnpm -r --filter './packages/*' build",
+    "test": "vitest run",
+    "e2e": "node scripts/e2e-local-first.mjs",
+    "references": "node scripts/reference-patterns.mjs",
+    "conformance": "node scripts/conformance-local-first.mjs",
+    "release:check": "pnpm build && pnpm test && pnpm e2e && pnpm references && pnpm conformance",
+    "serve": "node packages/cli/dist/index.js serve",
+    "studio": "node packages/cli/dist/index.js studio",
+    "clean": "pnpm -r --filter './packages/*' clean && rm -rf coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "yaml": "^2.9.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

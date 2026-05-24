@@ -1,0 +1,23 @@
+{
+  "name": "@agentbase/tools-database",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@agentbase/core": "workspace:*",
+    "mysql2": "^3.15.3",
+    "pg": "^8.16.3"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --platform node",
+    "clean": "rm -rf dist"
+  }
+}

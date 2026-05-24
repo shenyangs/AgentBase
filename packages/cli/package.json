@@ -1,0 +1,51 @@
+{
+  "name": "@agentbase/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agentbase": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@agentbase/artifacts": "workspace:*",
+    "@agentbase/code-index": "workspace:*",
+    "@agentbase/config": "workspace:*",
+    "@agentbase/context-default": "workspace:*",
+    "@agentbase/core": "workspace:*",
+    "@agentbase/evals": "workspace:*",
+    "@agentbase/evolution": "workspace:*",
+    "@agentbase/guardrails": "workspace:*",
+    "@agentbase/memory": "workspace:*",
+    "@agentbase/mcp": "workspace:*",
+    "@agentbase/orchestrator": "workspace:*",
+    "@agentbase/patterns": "workspace:*",
+    "@agentbase/provider-litellm": "workspace:*",
+    "@agentbase/provider-ollama": "workspace:*",
+    "@agentbase/provider-openai-compatible": "workspace:*",
+    "@agentbase/replay": "workspace:*",
+    "@agentbase/server": "workspace:*",
+    "@agentbase/studio": "workspace:*",
+    "@agentbase/stores-sqlite": "workspace:*",
+    "@agentbase/tools-browser": "workspace:*",
+    "@agentbase/tools-database": "workspace:*",
+    "@agentbase/tools-fs": "workspace:*",
+    "@agentbase/tools-git": "workspace:*",
+    "@agentbase/tools-http": "workspace:*",
+    "@agentbase/tools-web": "workspace:*",
+    "@agentbase/tools-shell": "workspace:*",
+    "@agentbase/trace": "workspace:*",
+    "@agentbase/wiki": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean --platform node",
+    "clean": "rm -rf dist"
+  }
+}

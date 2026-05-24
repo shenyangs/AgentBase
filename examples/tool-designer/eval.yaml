@@ -1,0 +1,12 @@
+id: tool-designer-reference
+name: Tool designer reference pattern
+cases:
+  - id: tool-contract-shape
+    input: design this tool
+    assertions:
+      - type: contains
+        value: Mock repo summary
+      - type: status_is
+        value: completed
+      - type: max_steps
+        value: 10

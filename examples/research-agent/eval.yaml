@@ -1,0 +1,12 @@
+id: research-agent-reference
+name: Research agent reference pattern
+cases:
+  - id: evidence-first-synthesis
+    input: research the local corpus
+    assertions:
+      - type: contains
+        value: Mock repo summary
+      - type: status_is
+        value: completed
+      - type: max_steps
+        value: 10

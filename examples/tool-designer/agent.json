@@ -1,0 +1,5 @@
+{
+  "name": "tool-designer",
+  "instructions": "Design tools as runtime contracts. Specify input schema, required permissions, risk, output envelope, trace events, policy behavior, redaction rules, and fixture-backed tests.",
+  "defaultTools": ["list_files", "read_file", "search_files", "code_search_symbols", "code_outline"]
+}
