@@ -1,132 +1,176 @@
 # AgentBase
 
-Build agents without rebuilding the agent runtime.
+**少重写一百次 agent runtime。**
 
-AgentBase is a local-first TypeScript runtime platform for product-grade agents. The current implementation keeps the smallest useful loop intact and adds the platform bones around it:
+AgentBase 是一个 local-first、TypeScript-first 的 agent runtime 标准底座。它不是又一个固定 agent，也不是低代码画布，更不是一层 provider 包装；它试图把 agent 产品里最容易反复重写、最容易失控的底层能力固化成可复用工程契约：
 
 ```txt
 CLI -> Runtime -> Context -> ModelProvider -> ToolCall -> ToolExecutor -> Trace
 ```
 
-## Why AgentBase Matters
+## 为什么做 AgentBase
 
-The open-source ecosystem has enough one-off agent demos. What is still missing is a reusable runtime contract: append-only traces, policy-first execution, tool result refs, budget-planned context, approval checkpoints, deterministic replay, and eval-gated evolution. AgentBase exists so teams can stop rebuilding the harness and compete on product judgment, domain tools, memory quality, and workflow design.
+现在开源社区不缺 agent demo。真正缺的是一套可以长期使用、能解释、能治理、能回放、能评测、能扩展的 runtime contract。
 
-AgentBase is not a low-code canvas, a single coding agent, or a thin provider wrapper. It is the local-first substrate for building, governing, replaying, and extending agents.
+很多团队做 agent 时都会重复踩同一批坑：
 
-## Release Status
+- 工具调用没有统一 schema 和权限边界。
+- 运行过程不可解释，失败后只能改 prompt 碰运气。
+- 文件、shell、git、browser、database、MCP 等工具每个项目都重写一遍。
+- 上下文管理靠拼字符串，后续很难做缓存、引用、记忆和压缩。
+- 没有 replay/eval，无法判断一次 prompt 或 tool 改动有没有造成回归。
+- “自进化”和“记忆”容易变成黑箱自动写配置，无法审计和回滚。
 
-This repository is currently a **v0.1 public preview / Local-First 1.0 release candidate**. It is ready to clone, build, run, inspect, and extend from source. It is not yet claimed as a published npm 1.0 package set.
+AgentBase 的核心判断是：**未来 agent 产品的竞争，不应该浪费在重复写 runtime harness 上，而应该回到产品判断、领域工具、上下文质量、工作流和记忆治理。**
 
-Use the source CLI through:
+## 你可以用它做什么
 
-```bash
-pnpm agentbase --help
-```
+你可以把 AgentBase 当作一个本地开源 agent 平台底座，用来：
 
-## Quickstart
+- 搭一个 repo analyst、test runner、research agent、tool designer、memory curator。
+- 为自己的产品接入安全的文件、shell、git、HTTP、browser、database、MCP、code index 工具。
+- 给 agent 每次运行留下 append-only trace，方便解释行为和排查失败。
+- 用 context snapshot 观察模型到底看到了什么证据、记忆、工具结果和最新 preview。
+- 用 replay/eval/guardrail/conformance 做回归测试，而不是靠感觉调 prompt。
+- 用 local Studio 查看 run timeline、tool calls、artifacts、approvals、memory、wiki、eval 和 settings。
+- 在本地先做一个可治理的 agent runtime，再按需要二次开发成自己的产品。
 
-Five-minute mock run:
+一句话：
+
+> AgentBase 不是帮你做某一个 agent，而是帮你少重写一百次 agent runtime。
+
+## 当前状态
+
+这是 **v0.1 public preview / Local-First 1.0 RC**。
+
+它已经可以从源码 clone、安装、构建、运行、查看 trace、打开 Studio、跑 reference patterns 和 conformance。它还不是 npm 1.0 正式发布包，也不是云端 SaaS。
+
+当前明确不声称完成的能力：内置向量检索。1.0 先采用 lexical/FTS-first，本地向量检索留给 1.x 插件。
+
+## 快速开始
+
+要求：
+
+- Node.js 24+
+- pnpm 11+
 
 ```bash
 pnpm install
 pnpm build
 pnpm test
+```
 
+源码版 CLI：
+
+```bash
+pnpm agentbase --help
+```
+
+5 分钟跑通一个 mock agent：
+
+```bash
 pnpm agentbase init /tmp/agentbase-demo
-pnpm agentbase patterns list
-pnpm agentbase patterns init repo-analyst /tmp/agentbase-pattern
-pnpm agentbase patterns run repo-analyst --target /tmp/agentbase-pattern-run
-pnpm agentbase config show --cwd /tmp/agentbase-demo
 pnpm agentbase provider set mock --model mock/repo-analyst --cwd /tmp/agentbase-demo
 pnpm agentbase run "summarize this repo" --mock --cwd /tmp/agentbase-demo
 pnpm agentbase trace list --cwd /tmp/agentbase-demo
+pnpm agentbase trace show <run-id> --cwd /tmp/agentbase-demo
 ```
 
-Fifteen-minute local governance loop:
+跑一个 reference pattern：
 
 ```bash
-pnpm agentbase session list --cwd /tmp/agentbase-demo
-pnpm agentbase policy show --cwd /tmp/agentbase-demo
-pnpm agentbase tools inspect --cwd /tmp/agentbase-demo
-pnpm agentbase tools enable @agentbase/tools-http --cwd /tmp/agentbase-demo
-pnpm agentbase provider test --cwd /tmp/agentbase-demo
-pnpm agentbase replay run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase run --resume <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase export traces --format openinference --run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase export push --target local-observer --run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase eval run --suite ./agentbase.eval.yaml --run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase guardrail scan --run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase memory propose "Prefer bounded tool previews" --scope project --cwd /tmp/agentbase-demo
-pnpm agentbase memory review <proposal-id> --approve --cwd /tmp/agentbase-demo
-pnpm agentbase memory promote-proposal <proposal-id> --cwd /tmp/agentbase-demo
-pnpm agentbase evolve propose <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase evolve test <proposal-id> --suite ./agentbase.eval.yaml --run <run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase evolve promote <proposal-id> --cwd /tmp/agentbase-demo
-pnpm agentbase evolve rollback <promotion-id> --cwd /tmp/agentbase-demo
-pnpm agentbase team run "summarize this repo" --mock --cwd /tmp/agentbase-demo
-pnpm agentbase team cancel <workflow-run-id> --cwd /tmp/agentbase-demo
-pnpm agentbase store doctor --cwd /tmp/agentbase-demo
-pnpm agentbase backup create --cwd /tmp/agentbase-demo
-pnpm agentbase serve --cwd /tmp/agentbase-demo
+pnpm agentbase patterns list
+pnpm agentbase patterns init repo-analyst /tmp/agentbase-pattern
+pnpm agentbase patterns run repo-analyst --target /tmp/agentbase-pattern-run
+```
+
+打开本地治理台：
+
+```bash
 pnpm agentbase studio --cwd /tmp/agentbase-demo
 ```
 
-Production-style contract gate:
+完整发布检查：
 
 ```bash
 pnpm release:check
 ```
 
-For a guided UI path, see [Studio Quick Demo](docs/studio_quick_demo.md).
+`pnpm release:check` 会跑 build、test、e2e、reference patterns 和 conformance。
 
-If you are using Codex to create your first custom agent, give it this prompt after cloning and building:
+## 如果你是小白，可以让 Codex 帮你拼一个 agent
+
+clone 并 build 之后，把这段话交给 Codex：
 
 ```txt
-Use AgentBase from this repository. Initialize a new workspace from the closest reference pattern, edit .agentbase/agent.json for my goal, choose safe default tools, add a small eval suite, run it with --mock, then show me the trace and what to change next.
+Use AgentBase from this repository. Create a new agent workspace for this goal:
+<describe my goal>. Start from the closest reference pattern, edit
+.agentbase/agent.json, choose the safest default tools, add a minimal eval
+suite, run it with --mock, inspect the trace, and tell me the smallest next
+change to improve it.
 ```
 
-For the manual path, see [Build Your First Agent](docs/build_your_first_agent.md).
+更详细的手动路径见 [Build Your First Agent](docs/build_your_first_agent.md)。
 
-## What You Get
+## 核心工程契约
 
-- `@agentbase/core`: runtime loop, tool registry, tool executor, policy, approval-aware run state, mock provider.
-- `@agentbase/config`: shared config control plane for load/validate/patch/redact/provider test, used by CLI, server, and Studio.
-- `@agentbase/patterns`: shared reference pattern catalog, validators, path helpers, default prompts, and pattern run report reader.
-- `@agentbase/artifacts`: file-backed artifact store and `materialize_ref` tool.
-- `@agentbase/memory`: file-backed memory primitives and memory tools; SQLite projects use the platform store for durable memory plus proposal/review/eval/promotion governance.
-- `@agentbase/wiki`: repo wiki indexer that can also write wiki summaries into memory.
-- `@agentbase/replay`: trace loader, deterministic replay result, eval metadata extraction, and model/tool diffing.
-- `@agentbase/stores-sqlite`: SQLite platform store for runs, sessions, events, artifacts, memory, wiki, evals, code index, approvals, and audit log.
-- `@agentbase/server`: local single-tenant HTTP API over the SQLite platform store with token auth, readiness, approvals, guardrail scan/audit, context snapshots, replay diff, conformance reports, export push, memory promotion, store maintenance, audit, artifacts, and redaction.
-- `@agentbase/evals`: JSON/YAML eval suite loader, assertion runner, and eval reports for output/status/steps/tool calls/latency/cost.
-- `@agentbase/guardrails`: shared prompt-injection, secret, workspace-escape, dangerous-action, and memory-poisoning scanners for CLI, eval, and conformance gates.
-- `@agentbase/orchestrator`: multi-agent workflow plan, runtime-backed executor, handoffs, blackboard, deterministic child runs, and default roles.
-- `@agentbase/evolution`: eval-gated evolution proposal primitives.
-- `@agentbase/provider-openai-compatible`: thin Chat Completions compatible model provider.
-- `@agentbase/provider-litellm`: LiteLLM proxy adapter built on the compatible provider.
-- `@agentbase/provider-ai-sdk`: adapter for AI SDK-like `generateText` functions.
-- `@agentbase/provider-ollama`: local Ollama adapter via OpenAI-compatible endpoints.
-- `@agentbase/trace`: JSONL trace store, secret redaction, and observability exporters for JSONL, OpenTelemetry-ish, OpenInference/Phoenix-ish, and Langfuse-ish JSON.
-- `@agentbase/context-default`: budget-planned context assembly with stable prefix, pinned/relevant memory, wiki hits, code symbols, artifact refs, working set, and latest preview.
-- `@agentbase/code-index`: local code index tools for symbols, references, outlines, and workspace indexing.
-- `@agentbase/tools-fs`: workspace-safe read, write, list, and search tools.
-- `@agentbase/tools-shell`: policy-checked shell execution.
-- `@agentbase/tools-git`: read-only git status, diff, show, and log tools.
-- `@agentbase/tools-web`: fetch and search tools backed by a pluggable SearchProvider.
-- `@agentbase/tools-http`: policy-gated HTTP requests with redaction and artifact-backed bodies.
-- `@agentbase/tools-browser`: Playwright-backed managed/CDP browser tools for snapshots and interaction.
-- `@agentbase/tools-database`: SQLite/Postgres/MySQL database tools with read/write policy gates.
-- `@agentbase/mcp`: MCP manifest, stdio/http tool loading, and AgentBase tool adaptation.
-- `@agentbase/studio-ui`: Vite/React local governance UI for run timelines, context snapshots, tool calls, approval decisions, replay diff, conformance reports, guardrail scans, memory promotion/proposals, typed artifact inspection, wiki, evals, reference patterns, audit, store health, backups, compaction, export push, and retention dry-runs.
-- `@agentbase/studio`: local Studio server that serves the React UI and platform API, including guardrail scan/audit, replay diff, conformance reports, and export push, with HTML fallback for source-only builds.
-- `@agentbase/cli`: `init`, `run`, `session`, `approval`, `config`, `store`, `tools`, `provider`, `memory`, `wiki`, `replay`, `eval`, `guardrail`, `evolve`, `team`, `studio`, `serve`, `export`, `backup`, and `trace` commands, including `run --resume`, `team cancel`, `export push`, and `evolve rollback`.
+AgentBase 的价值不在于“多一个框架”，而在于这些约束能被测试、审计和复用：
+
+- **append-only trace**：运行事实不被覆盖，失败后能回看。
+- **policy-first execution**：高风险工具先过 policy 和 approval。
+- **tool-result ref envelope**：大结果进入 artifact，只把 summary/ref/preview 给模型。
+- **context budget planner**：上下文不是拼接字符串，而是有预算、有分层、有 snapshot。
+- **approval checkpoint**：危险动作可以暂停、批准、拒绝、恢复。
+- **deterministic replay**：用 recorded events 重放，不依赖真实网络/DB/browser。
+- **eval-gated evolution**：prompt、memory、policy、skill 改动必须有证据，能回滚。
+- **local-first governance**：SQLite、本地 trace、本地 Studio、本地 server，默认不依赖云。
+
+## 内置能力
+
+运行时与治理：
+
+- `@agentbase/core`：runtime loop、tool registry、tool executor、policy、approval-aware run state、mock provider。
+- `@agentbase/config`：CLI/server/Studio 共用的 config load/validate/patch/redact。
+- `@agentbase/stores-sqlite`：runs、sessions、events、artifacts、memory、wiki、evals、code index、approvals、audit。
+- `@agentbase/trace`：JSONL trace store、secret redaction、OpenTelemetry-ish、OpenInference/Phoenix-ish、Langfuse-ish export。
+- `@agentbase/replay`：trace loader、deterministic replay、model/tool diff。
+- `@agentbase/evals`：JSON/YAML eval suite、status/steps/tool/latency/cost/guardrail assertions。
+- `@agentbase/guardrails`：prompt injection、secret、workspace escape、dangerous action、memory poisoning 扫描。
+
+上下文、记忆与知识：
+
+- `@agentbase/context-default`：stable prefix、policy、tools、memory、wiki/code hits、artifact refs、latest preview。
+- `@agentbase/memory`：durable memory primitives、proposal/review/promotion governance。
+- `@agentbase/wiki`：repo wiki indexer，可以把代码、文档和决策沉淀成可查询上下文。
+- `@agentbase/code-index`：symbols、references、outline、workspace index。
+
+工具与 provider：
+
+- `@agentbase/tools-fs`：workspace-safe read/write/list/search。
+- `@agentbase/tools-shell`：policy-checked shell execution。
+- `@agentbase/tools-git`：read-only git status/diff/show/log。
+- `@agentbase/tools-web`：fetch/search tools with pluggable SearchProvider。
+- `@agentbase/tools-http`：policy-gated HTTP request，带 redaction 和 artifact-backed body。
+- `@agentbase/tools-browser`：Playwright managed/CDP browser tools。
+- `@agentbase/tools-database`：SQLite/Postgres/MySQL database tools，读写 policy gate。
+- `@agentbase/mcp`：MCP manifest、stdio/http tool loading、AgentBase tool adaptation。
+- `@agentbase/provider-openai-compatible`、`@agentbase/provider-litellm`、`@agentbase/provider-ai-sdk`、`@agentbase/provider-ollama`。
+
+产品面：
+
+- `@agentbase/cli`：init/run/session/approval/config/tools/provider/memory/wiki/replay/eval/guardrail/evolve/team/studio/serve/export/backup/trace。
+- `@agentbase/server`：本地单租户 HTTP API，带 token auth、redaction、audit、settings、runs、approvals、artifacts、evals、export push。
+- `@agentbase/studio-ui` + `@agentbase/studio`：本地 React Studio，用于调试和治理，不做低代码画布。
 
 ## Reference Patterns
 
-AgentBase includes five checked reference patterns: `repo-analyst`, `test-runner`, `research-agent`, `tool-designer`, and `memory-curator`. Each one has an agent spec, eval suite, README, fixture, and manifest entry so teams can copy a working runtime pattern instead of reverse-engineering a demo.
+AgentBase 内置五个已检查的 reference patterns：
 
-The catalog is available through CLI, SDK package, server API, and Studio: `GET /api/patterns` returns the catalog plus recent `.agentbase/pattern-runs/*.json` reports for the current workspace.
+- `repo-analyst`：检查仓库，基于 file/git/code-index evidence 生成摘要。
+- `test-runner`：通过 policy-gated shell 运行测试并总结失败。
+- `research-agent`：把外部材料作为 untrusted evidence，分离来源和综合。
+- `tool-designer`：把工具需求转成 schema、permissions、risk、envelope、trace、tests。
+- `memory-curator`：只把有来源、可复用、非 secret、scope 清晰的信息推广为长期记忆。
 
 ```bash
 pnpm references
@@ -134,29 +178,101 @@ pnpm agentbase patterns list
 pnpm agentbase patterns show test-runner
 pnpm agentbase patterns init test-runner /tmp/agentbase-test-runner
 pnpm agentbase patterns run test-runner --target /tmp/agentbase-test-runner-run
-pnpm agentbase patterns eval test-runner --cwd /tmp/agentbase-test-runner --run <run-id>
 ```
 
-See [Reference Patterns](docs/reference_patterns.md).
+更多见 [Reference Patterns](docs/reference_patterns.md)。
 
-Tool results are represented as append-only ref envelopes in model-visible tool messages. The latest concrete preview is appended at the dynamic suffix so the stable prefix remains cache-friendly while the model still sees fresh evidence.
+## Studio 快速演示
 
-Context is assembled through a budget planner. The stable prefix stays cache-friendly, while memory, wiki, code index hits, artifacts, working set, and latest tool previews are separate auditable sections in the context snapshot. External/project-derived context is marked as untrusted evidence so it cannot override system, developer, or policy instructions.
+```bash
+pnpm agentbase init /tmp/agentbase-demo
+pnpm agentbase run "summarize this repo" --mock --cwd /tmp/agentbase-demo
+pnpm agentbase guardrail scan --run <run-id> --cwd /tmp/agentbase-demo
+pnpm agentbase store doctor --cwd /tmp/agentbase-demo
+pnpm agentbase studio --cwd /tmp/agentbase-demo
+```
 
-## Platform Notes
+打开 Studio 后可以看：
 
-SQLite is the default local store for new projects. It includes schema versioning, migration guards, integrity doctor, FTS-backed memory/wiki/code lookup, `store compact`, retention-aware `store prune`, and backup/restore. JSONL remains the portable trace export format.
+- run timeline
+- context snapshot
+- tool calls
+- artifacts
+- guardrail scan
+- replay diff
+- conformance reports
+- settings
+- store health / backup / export
 
-High-risk tools emit `policy.checked` and `approval.required` trace events when blocked. Runtime runs can now enter `waiting_approval`; approval requests are persisted with pending and already-completed tool-call checkpoint state, then approved or denied through CLI/server before deterministic `run --resume`.
+完整路径见 [Studio Quick Demo](docs/studio_quick_demo.md)。
 
-Multi-agent workflows run through the same runtime now. `team run` creates a parent workflow run, emits `workflow.*` and `agent.handoff` events, executes each task as a deterministic child run, and carries child artifact refs through the shared blackboard. Approval pauses and checkpoint resumes can continue without rerunning completed child tasks, and `team cancel` stops pending tasks at workflow boundaries.
+## 发布与贡献
 
-Replay, eval, guardrails, and export now form a real regression and observability path: `replay run` reconstructs a deterministic replay result from recorded events, `eval run --suite --run` evaluates output, run metadata, required/forbidden trace events, tool sequences, and guardrail assertions, `guardrail scan --run` audits recorded events for injection/secret/escape/danger/memory-poisoning findings, `replay diff` compares model/tool changes, `export traces --format openinference|otel|langfuse|phoenix` emits redacted local JSON payloads, and `export push --target <name>` can post those payloads to a local or remote observer.
-
-The self-evolution path is intentionally gated: proposals are produced as auditable artifacts, `evolve test --suite --run` attaches eval evidence, `evolve promote` writes auditable local changes with snapshots, and `evolve rollback` restores those snapshots. Durable memory has the same conservative path through `memory propose`, `memory review`, optional eval evidence, and `memory promote-proposal`; raw one-shot memory writes remain available for local experiments but are not the production governance path. The release gate is:
+本仓库的 release gate：
 
 ```bash
 pnpm release:check
 ```
 
-See [AgentBase Doctrine](docs/agentbase_doctrine.md), [Build Your First Agent](docs/build_your_first_agent.md), [Reference Patterns](docs/reference_patterns.md), [Studio Quick Demo](docs/studio_quick_demo.md), [Tool Authoring Guide](docs/tool_authoring_guide.md), [Release Notes](docs/release_notes_v0.1.md), [Release Process](docs/release_process.md), and [Contributing](CONTRIBUTING.md) for the runtime contract behind custom providers, tools, products, and governance surfaces.
+发布文档：
+
+- [Release Notes](docs/release_notes_v0.1.md)
+- [Release Process](docs/release_process.md)
+- [GitHub-ready Checklist](docs/github_ready_checklist.md)
+
+贡献文档：
+
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Tool Authoring Guide](docs/tool_authoring_guide.md)
+- [AgentBase Doctrine](docs/agentbase_doctrine.md)
+
+---
+
+# AgentBase English Overview
+
+**Build agents without rebuilding the agent runtime.**
+
+AgentBase is a local-first TypeScript runtime platform for product-grade agents. It is not a low-code canvas, a single coding agent, or a thin provider wrapper. It is a reusable runtime substrate for building, governing, replaying, evaluating, and extending agents.
+
+## Why It Exists
+
+The open-source ecosystem has enough one-off agent demos. What is still missing is a reusable runtime contract: append-only traces, policy-first execution, tool-result refs, budget-planned context, approval checkpoints, deterministic replay, eval-gated evolution, and local governance.
+
+AgentBase exists so teams can stop rebuilding the harness and compete on product judgment, domain tools, memory quality, and workflow design.
+
+## What You Can Build
+
+You can use AgentBase to build:
+
+- repository analysts
+- test runners
+- research agents
+- tool designers
+- memory curators
+- product-specific agents with safe fs/shell/git/http/browser/database/MCP tools
+- local Studio-backed agent governance workflows
+
+## Quickstart
+
+```bash
+pnpm install
+pnpm build
+pnpm test
+
+pnpm agentbase init /tmp/agentbase-demo
+pnpm agentbase provider set mock --model mock/repo-analyst --cwd /tmp/agentbase-demo
+pnpm agentbase run "summarize this repo" --mock --cwd /tmp/agentbase-demo
+pnpm agentbase trace list --cwd /tmp/agentbase-demo
+pnpm agentbase studio --cwd /tmp/agentbase-demo
+```
+
+Full release gate:
+
+```bash
+pnpm release:check
+```
+
+## Release Status
+
+This repository is a **v0.1 public preview / Local-First 1.0 release candidate**. It is ready to clone, build, run, inspect, and extend from source. It is not yet claimed as a published npm 1.0 package set. Built-in vector retrieval is intentionally left for a later plugin.
