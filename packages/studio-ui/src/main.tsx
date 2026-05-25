@@ -145,6 +145,16 @@ type ContextView = {
   contexts: RuntimeEvent[];
 };
 
+type ContextLayerSnapshot = {
+  id: string;
+  label: string;
+  purpose: string;
+  itemTypes: string[];
+  includedItems: number;
+  skippedItems: number;
+  tokenEstimate?: number;
+};
+
 type ConformanceReport = {
   runId: string;
   createdAt: string;
@@ -490,6 +500,8 @@ function ContextPanel({ view }: { view?: ContextView }) {
   if (!view) return <div className="empty">No context snapshot available</div>;
   const latest = view.latest;
   const items = Array.isArray(latest?.data.items) ? latest?.data.items : [];
+  const layers = Array.isArray(latest?.data.layers) ? (latest?.data.layers as ContextLayerSnapshot[]) : [];
+  const tokenTotal = layers.reduce((sum, layer) => sum + (Number(layer.tokenEstimate) || 0), 0);
   return (
     <div className="split-panel">
       <section className="event-card">
@@ -498,6 +510,29 @@ function ContextPanel({ view }: { view?: ContextView }) {
           <span className="pill">{items.length} item(s)</span>
         </div>
         <p>messageCount={String(latest?.data.messageCount ?? 0)} · tokenEstimate={String(latest?.data.tokenEstimate ?? 0)}</p>
+        {layers.length > 0 ? (
+          <div className="layer-grid">
+            {layers.map((layer) => {
+              const tokens = Number(layer.tokenEstimate) || 0;
+              const width = tokenTotal > 0 ? Math.max(5, Math.round((tokens / tokenTotal) * 100)) : 0;
+              return (
+                <article className="layer-card" key={layer.id}>
+                  <div className="event-head">
+                    <span className="event-type">{layer.label}</span>
+                    <span className="pill">{tokens} token(s)</span>
+                  </div>
+                  <div className="layer-meter" aria-label={`${layer.label} token share`}>
+                    <span style={{ width: `${width}%` }} />
+                  </div>
+                  <p>{layer.purpose}</p>
+                  <div className="meta-line">
+                    {layer.includedItems} included · {layer.skippedItems} skipped · {layer.itemTypes.join(", ") || "no item types"}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="list-panel compact-list">
           {items.map((item, index) => {
             const record = asRecord(item) ?? {};
@@ -514,8 +549,39 @@ function ContextPanel({ view }: { view?: ContextView }) {
           })}
         </div>
       </section>
-      <JsonPanel value={view} />
+      <ContextHistoryPanel contexts={view.contexts} />
     </div>
+  );
+}
+
+function ContextHistoryPanel({ contexts }: { contexts: RuntimeEvent[] }) {
+  if (contexts.length === 0) return <div className="empty">No context history found</div>;
+  return (
+    <section className="event-card">
+      <div className="event-head">
+        <span className="event-type">Context History</span>
+        <span className="pill">{contexts.length} snapshot(s)</span>
+      </div>
+      <div className="list-panel compact-list">
+        {contexts.map((event) => {
+          const itemCount = Array.isArray(event.data.items) ? event.data.items.length : 0;
+          const layerCount = Array.isArray(event.data.layers) ? event.data.layers.length : 0;
+          return (
+            <article className="report-row" key={event.id}>
+              <div>
+                <strong>{event.type}</strong>
+                <span>{formatTime(event.ts)} · {itemCount} item(s) · {layerCount} layer(s)</span>
+              </div>
+              <span className="pill">{String(event.data.tokenEstimate ?? 0)} token(s)</span>
+              <details className="raw-details">
+                <summary>Raw payload</summary>
+                <pre>{JSON.stringify(event.data, null, 2)}</pre>
+              </details>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

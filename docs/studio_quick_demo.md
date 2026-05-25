@@ -38,6 +38,9 @@ pnpm agentbase studio --cwd /tmp/agentbase-demo
 Open the printed local URL. In source-only builds, the Studio server also has a
 plain HTML fallback.
 
+For a fuller explanation of what the frontend shows, see
+[Studio Frontend](studio_frontend.md).
+
 ## 4. What to Click
 
 - Runs: inspect the latest run timeline and model/tool events.

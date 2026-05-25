@@ -321,6 +321,39 @@ pre {
   margin-top: 12px;
 }
 
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.layer-card {
+  border: 1px solid #26323c;
+  border-radius: 6px;
+  background: #10171d;
+  padding: 12px;
+}
+
+.layer-card p {
+  margin: 8px 0;
+}
+
+.layer-meter {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #0a0f13;
+  margin-top: 10px;
+}
+
+.layer-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #6fb8a7;
+}
+
 .split-panel {
   display: grid;
   grid-template-columns: minmax(300px, 0.9fr) minmax(340px, 1.1fr);
@@ -385,6 +418,14 @@ pre {
 
 .report-row small {
   grid-column: 1 / -1;
+}
+
+.raw-details {
+  grid-column: 1 / -1;
+}
+
+.raw-details pre {
+  max-height: 420px;
 }
 
 .pill {

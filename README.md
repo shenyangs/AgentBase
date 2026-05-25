@@ -242,6 +242,7 @@ pnpm agentbase studio --cwd /tmp/agentbase-demo
 - store health / backup / export
 
 完整路径见 [Studio Quick Demo](docs/studio_quick_demo.md)。
+前端长什么样、每个面板展示什么，见 [Studio Frontend](docs/studio_frontend.md)。
 
 ## 发布与贡献
 
@@ -262,6 +263,7 @@ pnpm release:check
 - [Contributing](CONTRIBUTING.md)
 - [Security Policy](SECURITY.md)
 - [Tool Authoring Guide](docs/tool_authoring_guide.md)
+- [Studio Frontend](docs/studio_frontend.md)
 - [Capability and Experience Ledger](docs/capability_and_experience_ledger.md)
 - [Runtime Control Plane and Specialists](docs/runtime_control_plane_and_specialists.md)
 - [AgentBase Doctrine](docs/agentbase_doctrine.md)

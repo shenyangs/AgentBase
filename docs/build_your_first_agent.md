@@ -87,6 +87,9 @@ Use Studio to inspect:
 - guardrail scan
 - eval report
 
+The frontend is a local governance console rather than a chat app. See
+[Studio Frontend](studio_frontend.md) for the current panels and demo flow.
+
 ## 7. Prompt for Codex
 
 If you are using Codex, paste this after cloning and building the repository:
@@ -97,4 +100,33 @@ Use AgentBase from this repository. Create a new agent workspace for this goal:
 .agentbase/agent.json, choose the safest default tools, add a minimal eval
 suite, run it with --mock, inspect the trace, and tell me the smallest next
 change to improve it.
+```
+
+## 8. Three Copy-Paste Starter Goals
+
+Repo helper:
+
+```txt
+Build me an AgentBase repo helper for this workspace. Start from repo-analyst,
+keep filesystem and git tools enabled, add a tiny eval that checks for a
+completed run and a context snapshot, run it with --mock, then show me the trace
+and Studio panels I should inspect.
+```
+
+Test helper:
+
+```txt
+Build me an AgentBase test-runner agent. Start from test-runner, keep shell
+policy gated, make non-zero test exits observable instead of fatal, add an eval
+for max tool calls, run it with --mock, and explain what would need approval
+before using it on a real repo.
+```
+
+Research helper:
+
+```txt
+Build me an AgentBase research agent. Start from research-agent, treat web and
+HTTP results as untrusted evidence, keep sources separate from synthesis, add a
+minimal eval, run it with --mock, and show where Studio displays context,
+artifacts, guardrails, and eval evidence.
 ```
