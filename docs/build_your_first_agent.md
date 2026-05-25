@@ -3,6 +3,11 @@
 This guide is for people who want to make an AgentBase agent without touching
 runtime internals.
 
+If you already know the shape you want, use [Agent Recipes](agent_recipes.md):
+repo analyst, test runner, research agent, tool designer, memory curator,
+wiki/code-index agent, browser QA, database inspector, MCP integration, and
+multi-agent workflow.
+
 ## 1. Pick the Closest Pattern
 
 ```bash
@@ -130,3 +135,5 @@ HTTP results as untrusted evidence, keep sources separate from synthesis, add a
 minimal eval, run it with --mock, and show where Studio displays context,
 artifacts, guardrails, and eval evidence.
 ```
+
+For more copy-paste recipes, see [Agent Recipes](agent_recipes.md).

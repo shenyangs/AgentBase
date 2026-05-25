@@ -4,6 +4,9 @@ AgentBase reference patterns are not demos. They are small, executable templates
 
 The manifest is [examples/reference-patterns.json](../examples/reference-patterns.json). Runtime code should read it through `@agentbase/patterns` instead of hand-parsing the file; CLI, server, and Studio all use that package as the shared contract.
 
+For task-oriented tutorials that explain how to turn these patterns into real
+agents, see [Agent Recipes](agent_recipes.md).
+
 ## Patterns
 
 - `repo-analyst`: inspect a repository with file/git/code-index evidence and produce a grounded summary.

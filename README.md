@@ -142,6 +142,7 @@ change to improve it.
 ```
 
 更详细的手动路径见 [Build Your First Agent](docs/build_your_first_agent.md)。
+如果你已经知道“我想做 X agent”，直接看 [Agent Recipes](docs/agent_recipes.md)。
 
 ## 核心工程契约
 
@@ -218,6 +219,7 @@ pnpm agentbase patterns run test-runner --target /tmp/agentbase-test-runner-run
 ```
 
 更多见 [Reference Patterns](docs/reference_patterns.md)。
+按具体目标拼 agent 的教程见 [Agent Recipes](docs/agent_recipes.md)。
 
 ## Studio 快速演示
 
@@ -264,6 +266,7 @@ pnpm release:check
 - [Security Policy](SECURITY.md)
 - [Tool Authoring Guide](docs/tool_authoring_guide.md)
 - [Studio Frontend](docs/studio_frontend.md)
+- [Agent Recipes](docs/agent_recipes.md)
 - [Capability and Experience Ledger](docs/capability_and_experience_ledger.md)
 - [Runtime Control Plane and Specialists](docs/runtime_control_plane_and_specialists.md)
 - [AgentBase Doctrine](docs/agentbase_doctrine.md)
