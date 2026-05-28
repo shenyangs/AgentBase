@@ -266,12 +266,32 @@ export type RuntimeEventDataByType = {
   "eval.completed": RuntimeEventData;
   "guardrail.completed": RuntimeEventData;
   "conformance.completed": RuntimeEventData;
+  "workspace.checked": RuntimeEventData;
+  "workspace.assets.listed": RuntimeEventData;
   "config.updated": RuntimeEventData;
   "provider.tested": RuntimeEventData;
+  "provider.route.checked": RuntimeEventData;
+  "provider.route.selected": RuntimeEventData;
+  "provider.route.fallback": RuntimeEventData;
+  "provider.cost.recorded": RuntimeEventData;
   "toolset.enabled": RuntimeEventData;
   "toolset.disabled": RuntimeEventData;
   "toolset.configured": RuntimeEventData;
   "policy.updated": RuntimeEventData;
+  "memory.used": RuntimeEventData;
+  "memory.lineage.linked": RuntimeEventData;
+  "memory.curate.proposed": RuntimeEventData;
+  "memory.superseded": RuntimeEventData;
+  "inbox.queued": RuntimeEventData;
+  "inbox.running": RuntimeEventData;
+  "inbox.waiting_approval": RuntimeEventData;
+  "inbox.delivered": RuntimeEventData;
+  "inbox.acknowledged": RuntimeEventData;
+  "inbox.failed": RuntimeEventData;
+  "inbox.cancelled": RuntimeEventData;
+  "hook.started": RuntimeEventData;
+  "hook.completed": RuntimeEventData;
+  "hook.failed": RuntimeEventData;
   "evolution.promoted": RuntimeEventData;
   "evolution.rolled_back": RuntimeEventData;
   "export.completed": RuntimeEventData;
@@ -322,12 +342,32 @@ export const RUNTIME_EVENT_TYPES = [
   "eval.completed",
   "guardrail.completed",
   "conformance.completed",
+  "workspace.checked",
+  "workspace.assets.listed",
   "config.updated",
   "provider.tested",
+  "provider.route.checked",
+  "provider.route.selected",
+  "provider.route.fallback",
+  "provider.cost.recorded",
   "toolset.enabled",
   "toolset.disabled",
   "toolset.configured",
   "policy.updated",
+  "memory.used",
+  "memory.lineage.linked",
+  "memory.curate.proposed",
+  "memory.superseded",
+  "inbox.queued",
+  "inbox.running",
+  "inbox.waiting_approval",
+  "inbox.delivered",
+  "inbox.acknowledged",
+  "inbox.failed",
+  "inbox.cancelled",
+  "hook.started",
+  "hook.completed",
+  "hook.failed",
   "evolution.promoted",
   "evolution.rolled_back",
   "export.completed",
@@ -512,6 +552,19 @@ export type MemoryProposal = {
   metadata?: Record<string, unknown>;
 };
 
+export type MemoryLineage = {
+  memoryId?: string;
+  proposalId?: string;
+  sourceRunId?: string;
+  sourceEventId?: string;
+  sourceArtifactRef?: string;
+  reviewedBy?: string;
+  promotedAt?: string;
+  usedByRunIds?: string[];
+  supersededBy?: string;
+  metadata?: Record<string, unknown>;
+};
+
 export type MemoryProposalStore = {
   propose(proposal: Omit<MemoryProposal, "id" | "status" | "createdAt" | "updatedAt"> & Partial<Pick<MemoryProposal, "id" | "status" | "createdAt" | "updatedAt">>): Promise<MemoryProposal>;
   getProposal(id: string): Promise<MemoryProposal | undefined>;
@@ -692,12 +745,12 @@ export type WorkflowExecutor = {
   execute(workflow: WorkflowSpec, input?: { runId?: string; sessionId?: string; signal?: AbortSignal; resume?: boolean; resumeState?: WorkflowResumeState; maxParallelTasks?: number }): Promise<WorkflowExecutionResult>;
 };
 
-export type RelayMessageStatus = "queued" | "delivered" | "acknowledged" | "failed" | "cancelled";
+export type RelayMessageStatus = "queued" | "running" | "waiting_approval" | "delivered" | "acknowledged" | "failed" | "cancelled";
 
 export type RelayMessage = {
   id: string;
   channel: string;
-  type: "run" | "team" | "approval" | "export" | "eval" | "browser" | "external" | string;
+  type: "run" | "team" | "approval" | "export" | "eval" | "browser" | "memory_curate" | "capability_draft" | "external" | string;
   payload: Record<string, unknown>;
   status: RelayMessageStatus;
   runId?: string;
@@ -709,6 +762,8 @@ export type RelayMessage = {
   createdAt: string;
   updatedAt: string;
   deliveredAt?: string;
+  runningAt?: string;
+  waitingApprovalAt?: string;
   acknowledgedAt?: string;
   failedAt?: string;
   cancelledAt?: string;
@@ -720,10 +775,136 @@ export type RelayMailbox = {
   send(message: Omit<RelayMessage, "id" | "status" | "attempts" | "createdAt" | "updatedAt"> & Partial<Pick<RelayMessage, "id" | "status" | "attempts" | "createdAt" | "updatedAt">>): Promise<RelayMessage>;
   list(filter?: { channel?: string; status?: RelayMessageStatus; runId?: string; limit?: number }): Promise<RelayMessage[]>;
   get(id: string): Promise<RelayMessage | undefined>;
+  markRunning?(id: string): Promise<RelayMessage>;
+  markWaitingApproval?(id: string, approvalId?: string): Promise<RelayMessage>;
   markDelivered(id: string): Promise<RelayMessage>;
   acknowledge(id: string): Promise<RelayMessage>;
   fail(id: string, error: string): Promise<RelayMessage>;
   cancel(id: string, reason?: string): Promise<RelayMessage>;
+};
+
+export type InboxTask = RelayMessage;
+
+export type ProviderRouteRule = {
+  id: string;
+  provider: string;
+  model?: string;
+  reason?: string;
+  match?: {
+    keywords?: string[];
+    taskTypes?: string[];
+    minContextTokens?: number;
+    maxContextTokens?: number;
+    risk?: ToolRisk | "any";
+    toolPermissions?: Permission[];
+    evalImportance?: "low" | "normal" | "high";
+  };
+  metadata?: Record<string, unknown>;
+};
+
+export type ProviderRouteInput = {
+  task: string;
+  taskType?: string;
+  risk?: ToolRisk;
+  contextTokens?: number;
+  toolPermissions?: Permission[];
+  evalImportance?: "low" | "normal" | "high";
+  budgetUsd?: number;
+  defaultProvider?: string;
+  defaultModel?: string;
+  routes?: ProviderRouteRule[];
+  fallbacks?: string[];
+};
+
+export type ProviderRouteDecision = {
+  provider: string;
+  model?: string;
+  routeId?: string;
+  reason: string;
+  matched: boolean;
+  fallbackProviders: string[];
+  estimatedRisk: ToolRisk;
+  budgetUsd?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type ProviderRouter = {
+  route(input: ProviderRouteInput): Promise<ProviderRouteDecision> | ProviderRouteDecision;
+};
+
+export type ProviderCostRecord = {
+  runId: string;
+  provider: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type WorkspaceAssetSummary = {
+  workspaceRoot: string;
+  runs: number;
+  pendingApprovals: number;
+  memories: number;
+  memoryProposals: number;
+  wikiPages: number;
+  codeFiles: number;
+  capabilities: number;
+  capabilityDrafts: number;
+  experienceEvents: number;
+  inboxTasks: number;
+  patternReports: number;
+  artifacts: number;
+  updatedAt: string;
+};
+
+export type WorkspaceManifest = {
+  name: string;
+  root: string;
+  configFile: string;
+  toolsets: string[];
+  provider: {
+    type: string;
+    model?: string;
+    route?: ProviderRouteDecision;
+  };
+  policy: PolicyName;
+  memoryScopes: MemoryScope[];
+  wiki: { enabled: boolean; pages: number };
+  codeIndex: { enabled: boolean; files: number };
+  capabilities: { active: number; drafts: number };
+  recentRuns: RunRecord[];
+  assets: WorkspaceAssetSummary;
+  issues: Array<{ path: string; message: string; severity: "error" | "warning" }>;
+  updatedAt: string;
+};
+
+export type LifecycleHookPoint = "BeforeRun" | "BeforeContext" | "BeforeModel" | "BeforeTool" | "AfterTool" | "AfterRun" | "OnApprovalRequired";
+
+export type LifecycleHookManifest = {
+  name: string;
+  version: string;
+  hook: LifecycleHookPoint;
+  description?: string;
+  permissions?: Permission[];
+  risk?: ToolRisk;
+  timeoutMs?: number;
+  blocking?: boolean;
+  inputSchema?: JsonSchema;
+  outputSchema?: JsonSchema;
+  metadata?: Record<string, unknown>;
+};
+
+export type LifecycleHookResult = {
+  hook: string;
+  ok: boolean;
+  summary: string;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  error?: ToolError;
 };
 
 export type CapabilityDraft = {

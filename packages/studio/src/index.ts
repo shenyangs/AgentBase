@@ -18,9 +18,12 @@ import {
 } from "@agentbase/config";
 import { scanRuntimeEvents, scanTextForGuardrails, summarizeGuardrailResults } from "@agentbase/guardrails";
 import { describeReferencePattern, getReferencePattern, listPatternRunReports, loadReferencePatternCatalog } from "@agentbase/patterns";
+import { routeProvider } from "@agentbase/provider-router";
+import { JsonRelayMailbox, relayMailboxFile } from "@agentbase/relay";
 import { diffReplay } from "@agentbase/replay";
 import { SqlitePlatformStore } from "@agentbase/stores-sqlite";
 import { JsonlTraceStore, serializeTraceExport, type TraceExportFormat } from "@agentbase/trace";
+import { createWorkspaceManifest, doctorWorkspace, summarizeWorkspaceAssets } from "@agentbase/workspace";
 
 export type StudioServer = {
   url: string;
@@ -145,6 +148,29 @@ export async function startStudioServer(options: StudioServerOptions): Promise<S
         return;
       }
 
+      if (url.pathname === "/api/provider/route/test" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const config = await requireConfig(options);
+        const task = stringField(body, "task") ?? "";
+        const decision = routeProvider({
+          task,
+          risk: stringField(body, "risk") as never,
+          contextTokens: numberField(body, "contextTokens"),
+          evalImportance: stringField(body, "evalImportance") as never,
+          defaultProvider: config.providers?.default ?? config.provider.type,
+          defaultModel: config.provider.model,
+          routes: config.providers?.routes,
+          fallbacks: config.providers?.fallbacks,
+          budgetUsd: config.providers?.budget?.maxCostUsd
+        });
+        if (sqlite) {
+          await sqlite.write({ id: createEventId(), runId: "provider-route", type: "provider.route.selected", ts: new Date().toISOString(), data: decision });
+          await sqlite.writeAudit({ action: "provider.route.selected", target: decision.provider, actor: "studio", metadata: decision });
+        }
+        sendJson(res, 200, decision);
+        return;
+      }
+
       const toolsetEnable = url.pathname.match(/^\/api\/tools\/([^/]+)\/enable$/);
       if (toolsetEnable && req.method === "POST") {
         const config = await requireConfig(options);
@@ -211,8 +237,84 @@ export async function startStudioServer(options: StudioServerOptions): Promise<S
         return;
       }
 
+      if (url.pathname === "/api/workspace" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile ?? options.traceDir ?? "."));
+        const recentRuns = sqlite ? await sqlite.listRuns({ limit: numberParam(url, "limit") ?? 10 }) : [];
+        const pendingApprovals = sqlite ? (await sqlite.listApprovals({ status: "pending", limit: 10_000 })).length : 0;
+        const manifest = await createWorkspaceManifest({ cwd: workspaceRoot, config, recentRuns: recentRuns.slice(0, numberParam(url, "limit") ?? 10), pendingApprovals });
+        manifest.provider.route = routeProvider({
+          task: "workspace cockpit",
+          defaultProvider: config.providers?.default ?? config.provider.type,
+          defaultModel: config.provider.model,
+          routes: config.providers?.routes,
+          fallbacks: config.providers?.fallbacks,
+          budgetUsd: config.providers?.budget?.maxCostUsd
+        });
+        sendJson(res, 200, manifest);
+        return;
+      }
+
+      if (url.pathname === "/api/workspace/assets" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile ?? options.traceDir ?? "."));
+        sendJson(
+          res,
+          200,
+          await summarizeWorkspaceAssets({
+            cwd: workspaceRoot,
+            config,
+            recentRuns: sqlite ? await sqlite.listRuns({ limit: 100 }) : [],
+            pendingApprovals: sqlite ? (await sqlite.listApprovals({ status: "pending", limit: 10_000 })).length : 0
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === "/api/workspace/doctor" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile ?? options.traceDir ?? "."));
+        sendJson(res, 200, { checks: await doctorWorkspace({ cwd: workspaceRoot, config }) });
+        return;
+      }
+
+      if (url.pathname === "/api/inbox" && req.method === "GET") {
+        const mailbox = relayMailboxForStudio(options);
+        sendJson(
+          res,
+          200,
+          await mailbox.list({
+            channel: url.searchParams.get("channel") ?? undefined,
+            status: (url.searchParams.get("status") as never) ?? undefined,
+            runId: url.searchParams.get("runId") ?? undefined,
+            limit: numberParam(url, "limit") ?? 100
+          })
+        );
+        return;
+      }
+
+      const inboxTransition = url.pathname.match(/^\/api\/inbox\/([^/]+)\/(retry|cancel)$/);
+      if (inboxTransition && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const mailbox = relayMailboxForStudio(options);
+        const id = decodeURIComponent(inboxTransition[1]);
+        const action = inboxTransition[2];
+        const current = await mailbox.get(id);
+        if (!current) throw new Error(`Inbox task not found: ${id}`);
+        const message =
+          action === "retry"
+            ? await mailbox.send({ ...current, id: undefined, status: "queued", attempts: 0, metadata: { ...(current.metadata ?? {}), retriedFrom: current.id } })
+            : await mailbox.cancel(id, stringField(body, "reason") ?? "inbox task cancelled");
+        if (sqlite) {
+          await sqlite.write({ id: createEventId(), runId: message.runId ?? "inbox", type: action === "retry" ? "inbox.queued" : "inbox.cancelled", ts: new Date().toISOString(), data: message });
+          await sqlite.writeAudit({ action: action === "retry" ? "inbox.queued" : "inbox.cancelled", target: message.id, runId: message.runId, actor: "studio", metadata: { action } });
+        }
+        sendJson(res, 200, message);
+        return;
+      }
+
       if (!sqlite) {
-        sendJson(res, 200, { name: "AgentBase Studio", mode: "jsonl", endpoints: ["/", "/api/runs", "/api/runs/:runId/events", "/api/patterns"] });
+        sendJson(res, 200, { name: "AgentBase Studio", mode: "jsonl", endpoints: ["/", "/api/runs", "/api/runs/:runId/events", "/api/workspace", "/api/inbox", "/api/patterns"] });
         return;
       }
 
@@ -513,18 +615,26 @@ function workspaceRootForConfig(configFile: string | undefined): string | undefi
   return configFile ? path.dirname(path.dirname(path.resolve(configFile))) : undefined;
 }
 
+function relayMailboxForStudio(options: StudioServerOptions): JsonRelayMailbox {
+  return new JsonRelayMailbox({ file: relayMailboxFile(workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile ?? options.traceDir ?? "."))) });
+}
+
 async function writeGovernance(store: SqlitePlatformStore | undefined, type: GovernanceEventType, data: Record<string, unknown>, actor: string): Promise<void> {
   if (!store) {
     throw new Error("Configuration mutations require SQLite studio mode.");
   }
   await store.write({
-    id: `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    id: createEventId(),
     runId: "governance",
     type,
     ts: new Date().toISOString(),
     data
   });
   await store.writeAudit({ action: type, target: ".agentbase/config.json", actor, metadata: data });
+}
+
+function createEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function normalizeToolsetName(name: string): string {

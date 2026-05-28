@@ -1,6 +1,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { createId, type EvalResult, type MemoryBlock, type MemoryProposal, type MemoryProposalStatus, type MemoryStore, type MemoryScope, type Tool } from "@agentbase/core";
+import {
+  createId,
+  type EvalResult,
+  type MemoryBlock,
+  type MemoryLineage,
+  type MemoryProposal,
+  type MemoryProposalStatus,
+  type MemoryStore,
+  type MemoryScope,
+  type RuntimeEvent,
+  type Tool
+} from "@agentbase/core";
 
 export class JsonMemoryStore implements MemoryStore {
   readonly file: string;
@@ -189,6 +200,111 @@ export class JsonMemoryProposalStore {
   }
 }
 
+type MemoryLineageDb = {
+  version: 1;
+  lineages: MemoryLineage[];
+};
+
+export class JsonMemoryLineageStore {
+  readonly file: string;
+
+  constructor(options: { file: string }) {
+    this.file = path.resolve(options.file);
+  }
+
+  async link(lineage: MemoryLineage): Promise<MemoryLineage> {
+    const db = await this.readDb();
+    const key = lineage.memoryId ?? lineage.proposalId ?? `${lineage.sourceRunId}:${lineage.sourceEventId}:${lineage.sourceArtifactRef}`;
+    const index = db.lineages.findIndex((entry) => (entry.memoryId ?? entry.proposalId ?? `${entry.sourceRunId}:${entry.sourceEventId}:${entry.sourceArtifactRef}`) === key);
+    const next: MemoryLineage = {
+      ...db.lineages[index],
+      ...lineage,
+      usedByRunIds: [...new Set([...(db.lineages[index]?.usedByRunIds ?? []), ...(lineage.usedByRunIds ?? [])])]
+    };
+    if (index >= 0) {
+      db.lineages[index] = next;
+    } else {
+      db.lineages.push(next);
+    }
+    await this.writeDb(db);
+    return next;
+  }
+
+  async list(filter: { memoryId?: string; proposalId?: string; runId?: string } = {}): Promise<MemoryLineage[]> {
+    const db = await this.readDb();
+    return db.lineages.filter((entry) => {
+      if (filter.memoryId && entry.memoryId !== filter.memoryId) return false;
+      if (filter.proposalId && entry.proposalId !== filter.proposalId) return false;
+      if (filter.runId && entry.sourceRunId !== filter.runId && !(entry.usedByRunIds ?? []).includes(filter.runId)) return false;
+      return true;
+    });
+  }
+
+  async markUsed(memoryId: string, runId: string): Promise<MemoryLineage> {
+    const [existing] = await this.list({ memoryId });
+    return this.link({
+      ...(existing ?? {}),
+      memoryId,
+      usedByRunIds: [...new Set([...(existing?.usedByRunIds ?? []), runId])]
+    });
+  }
+
+  async supersede(memoryId: string, supersededBy?: string): Promise<MemoryLineage> {
+    const [existing] = await this.list({ memoryId });
+    return this.link({ ...(existing ?? {}), memoryId, supersededBy: supersededBy ?? "superseded" });
+  }
+
+  private async readDb(): Promise<MemoryLineageDb> {
+    try {
+      const parsed = JSON.parse(await readFile(this.file, "utf8")) as MemoryLineageDb;
+      if (parsed.version === 1 && Array.isArray(parsed.lineages)) {
+        return parsed;
+      }
+    } catch {
+      // Empty lineage store.
+    }
+    return { version: 1, lineages: [] };
+  }
+
+  private async writeDb(db: MemoryLineageDb): Promise<void> {
+    await mkdir(path.dirname(this.file), { recursive: true });
+    await writeFile(this.file, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  }
+}
+
+export function memoryLineageFile(cwd: string, memoryFile = ".agentbase/memory/memory.json"): string {
+  return path.join(path.dirname(path.resolve(cwd, memoryFile)), "lineage.json");
+}
+
+export function draftMemoryProposalFromRun(events: RuntimeEvent[], runId: string): Omit<MemoryProposal, "id" | "status" | "createdAt" | "updatedAt"> {
+  const final = [...events].reverse().find((event) => event.type === "run.completed" || event.type === "model.completed");
+  const context = [...events].reverse().find((event) => event.type === "context.prepared");
+  const outputPreview = typeof final?.data.outputPreview === "string" ? final.data.outputPreview : typeof final?.data.status === "string" ? final.data.status : "Run completed with reusable local evidence.";
+  return {
+    memory: {
+      scope: "project",
+      text: `Run ${runId} produced reusable evidence: ${truncate(outputPreview, 240)}`,
+      kind: "summary",
+      tags: ["curated", "trace"],
+      source: runId,
+      metadata: {
+        sourceRunId: runId,
+        sourceEventId: final?.id,
+        contextEventId: context?.id
+      }
+    },
+    rationale: "Curated from a completed run. Review before promoting to durable memory.",
+    evidence: [
+      { type: "run", ref: runId, summary: "Source run for memory curate." },
+      ...(final ? [{ type: "trace", ref: final.id, summary: `Source event: ${final.type}` }] : [])
+    ],
+    metadata: {
+      source: "memory.curate",
+      sourceRunId: runId
+    }
+  };
+}
+
 export function createMemoryTools(store: MemoryStore): Tool[] {
   return [
     {
@@ -240,4 +356,8 @@ function tokenize(value: string): string[] {
 function scoreMemory(memory: MemoryBlock, terms: string[]): number {
   const haystack = `${memory.text} ${memory.tags?.join(" ") ?? ""} ${memory.kind ?? ""}`.toLowerCase();
   return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0) + (memory.score ?? 0);
+}
+
+function truncate(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }

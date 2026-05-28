@@ -9,6 +9,8 @@ describe("JsonRelayMailbox", () => {
     const workspace = await mkdtemp(path.join(os.tmpdir(), "agentbase-relay-"));
     const mailbox = new JsonRelayMailbox({ file: path.join(workspace, "mailbox.json") });
     const queued = await mailbox.send({ channel: "run", type: "run", runId: "run_1", payload: { prompt: "summarize" } });
+    const running = await mailbox.markRunning(queued.id);
+    const waiting = await mailbox.markWaitingApproval(queued.id, "appr_1");
     const delivered = await mailbox.markDelivered(queued.id);
     const acknowledged = await mailbox.acknowledge(queued.id);
     const failed = await mailbox.send({ channel: "export", type: "export", payload: { target: "observer" } });
@@ -16,7 +18,9 @@ describe("JsonRelayMailbox", () => {
     const cancelled = await mailbox.send({ channel: "approval", type: "approval", payload: { approvalId: "appr_1" } });
     await mailbox.cancel(cancelled.id, "user denied");
 
-    expect(delivered.attempts).toBe(1);
+    expect(running.status).toBe("running");
+    expect(waiting.status).toBe("waiting_approval");
+    expect(delivered.attempts).toBe(2);
     expect(acknowledged.status).toBe("acknowledged");
     expect(await mailbox.list({ status: "failed" })).toEqual([expect.objectContaining({ error: "network unavailable" })]);
     expect(await mailbox.list({ channel: "approval" })).toEqual([expect.objectContaining({ status: "cancelled" })]);

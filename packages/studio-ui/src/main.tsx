@@ -2,21 +2,29 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  AlertTriangle,
   Archive,
   Brain,
   CheckCircle2,
   Clock3,
+  Cpu,
   Database,
   Eye,
   FileText,
   GitBranch,
   Library,
+  Layers,
+  Play,
   Pin,
+  Search,
+  Server,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   TerminalSquare,
   TimerReset,
+  Wrench,
   XCircle
 } from "lucide-react";
 import "./styles.css";
@@ -119,6 +127,27 @@ type PatternCatalogView = {
   reports?: ReferencePatternRunReport[];
 };
 
+type WorkspaceManifest = {
+  name: string;
+  root: string;
+  toolsets: string[];
+  policy: string;
+  provider: { type: string; model?: string; route?: Record<string, unknown> };
+  assets: Record<string, number | string>;
+  issues: Array<{ path: string; message: string; severity: string }>;
+};
+
+type InboxTask = {
+  id: string;
+  channel: string;
+  type: string;
+  status: string;
+  runId?: string;
+  attempts: number;
+  updatedAt: string;
+  payload?: Record<string, unknown>;
+};
+
 type GuardrailResult = {
   allowed: boolean;
   reason: string;
@@ -169,6 +198,7 @@ type ReplayDiffView = {
 };
 
 type PanelKey =
+  | "workspace-cockpit"
   | "timeline"
   | "context"
   | "tools"
@@ -179,6 +209,7 @@ type PanelKey =
   | "artifacts"
   | "evals"
   | "patterns"
+  | "inbox"
   | "replay-diff"
   | "conformance"
   | "guardrails"
@@ -187,6 +218,7 @@ type PanelKey =
   | "settings";
 
 const panels: Array<{ key: PanelKey; label: string; endpoint?: string; icon: typeof Activity }> = [
+  { key: "workspace-cockpit", label: "Workspace", endpoint: "/api/workspace", icon: Sparkles },
   { key: "timeline", label: "Timeline", icon: Activity },
   { key: "context", label: "Context", icon: FileText },
   { key: "tools", label: "Tool Calls", icon: TerminalSquare },
@@ -197,6 +229,7 @@ const panels: Array<{ key: PanelKey; label: string; endpoint?: string; icon: typ
   { key: "artifacts", label: "Artifacts", endpoint: "/api/artifacts", icon: Archive },
   { key: "evals", label: "Evals", endpoint: "/api/evals", icon: CheckCircle2 },
   { key: "patterns", label: "Patterns", endpoint: "/api/patterns", icon: Library },
+  { key: "inbox", label: "Inbox", endpoint: "/api/inbox", icon: Clock3 },
   { key: "replay-diff", label: "Replay Diff", icon: GitBranch },
   { key: "conformance", label: "Conformance", endpoint: "/api/conformance/reports", icon: ShieldCheck },
   { key: "guardrails", label: "Guardrails", icon: ShieldCheck },
@@ -205,11 +238,26 @@ const panels: Array<{ key: PanelKey; label: string; endpoint?: string; icon: typ
   { key: "settings", label: "Settings", endpoint: "/api/config", icon: SlidersHorizontal }
 ];
 
+const primaryNav: Array<{ key: PanelKey; label: string; icon: typeof Activity }> = [
+  { key: "workspace-cockpit", label: "Workspace", icon: Sparkles },
+  { key: "timeline", label: "Runs", icon: Play },
+  { key: "context", label: "Context", icon: Layers },
+  { key: "tools", label: "Tool Calls", icon: Wrench },
+  { key: "approvals", label: "Approvals", icon: ShieldCheck },
+  { key: "memory", label: "Memory", icon: Brain },
+  { key: "wiki", label: "Wiki & Code", icon: FileText },
+  { key: "artifacts", label: "Artifacts", icon: Archive },
+  { key: "inbox", label: "Inbox", icon: Clock3 },
+  { key: "evals", label: "Evals", icon: CheckCircle2 },
+  { key: "guardrails", label: "Guardrails", icon: AlertTriangle },
+  { key: "settings", label: "Settings", icon: SlidersHorizontal }
+];
+
 function App() {
   const [runs, setRuns] = useState<RunRecord[]>([]);
   const [events, setEvents] = useState<RuntimeEvent[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string>();
-  const [panel, setPanel] = useState<PanelKey>("timeline");
+  const [panel, setPanel] = useState<PanelKey>("workspace-cockpit");
   const [platformData, setPlatformData] = useState<unknown>();
   const [artifactDetail, setArtifactDetail] = useState<unknown>();
   const [maintenanceResult, setMaintenanceResult] = useState<unknown>();
@@ -228,14 +276,19 @@ function App() {
     setRuns(nextRuns);
     setLoading(false);
     if (nextRuns[0]) {
-      await selectRun(nextRuns[0].runId);
+      await selectRun(nextRuns[0].runId, "workspace-cockpit");
+    } else {
+      await openPanel("workspace-cockpit");
     }
   }
 
-  async function selectRun(runId: string) {
+  async function selectRun(runId: string, nextPanel: PanelKey = "timeline") {
     setSelectedRunId(runId);
-    setPanel("timeline");
+    setPanel(nextPanel);
     setEvents(await getJson<RuntimeEvent[]>(`/api/runs/${encodeURIComponent(runId)}/events`));
+    if (nextPanel === "workspace-cockpit") {
+      setPlatformData(await getJson("/api/workspace"));
+    }
   }
 
   async function openPanel(nextPanel: PanelKey) {
@@ -372,10 +425,14 @@ function App() {
   const toolEvents = useMemo(() => events.filter((event) => event.type.startsWith("tool.") || event.type === "policy.checked"), [events]);
   const contextEvents = useMemo(() => events.filter((event) => event.type.startsWith("context.")), [events]);
   const modelEvents = useMemo(() => events.filter((event) => event.type.startsWith("model.")), [events]);
+  const runGroups = useMemo(() => groupRunsByDay(runs), [runs]);
+  const toolCallCount = events.filter((event) => event.type === "tool.started").length || toolEvents.filter((event) => event.type === "tool.completed").length;
+  const contextSize = contextEvents.at(-1)?.data.tokenEstimate;
+  const approvalCount = events.filter((event) => event.type.startsWith("approval.") || event.type === "run.waiting_approval").length;
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <aside className="app-nav">
         <div className="brand">
           <Sparkles size={20} />
           <div>
@@ -383,23 +440,56 @@ function App() {
             <span>Local runtime governance</span>
           </div>
         </div>
-        <div className="search-row">
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search memory or wiki" />
+        <nav className="nav-list" aria-label="Primary Studio sections">
+          {primaryNav.map((item) => {
+            const Icon = item.icon;
+            const badge = item.key === "approvals" && approvalCount > 0 ? approvalCount : undefined;
+            return (
+              <button className={panel === item.key ? "active" : ""} key={item.key} onClick={() => openPanel(item.key)}>
+                <Icon size={17} />
+                <span>{item.label}</span>
+                {badge ? <strong className="nav-badge">{badge}</strong> : null}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="server-card">
+          <Server size={16} />
+          <div>
+            <strong>Local Server</strong>
+            <span>{window.location.host || "localhost"}</span>
+          </div>
+        </div>
+        <div className="nav-foot">Local-first · TypeScript · Open Source</div>
+      </aside>
+
+      <aside className="run-rail">
+        <div className="rail-head">
+          <h2>Runs</h2>
           <button aria-label="Refresh" title="Refresh runs" onClick={() => loadRuns()}>
             <TimerReset size={16} />
           </button>
         </div>
+        <div className="search-row">
+          <Search size={16} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search memory or wiki" />
+        </div>
         <section className="side-section">
-          <h2>Runs</h2>
           {loading ? <div className="empty">Loading runs</div> : null}
-          {runs.map((run) => (
-            <button className={`run-button ${run.runId === selectedRunId ? "active" : ""}`} key={run.runId} onClick={() => selectRun(run.runId)}>
-              <StatusIcon status={run.status} />
-              <span>
-                <strong>{run.runId}</strong>
-                <small>{run.status} · {run.agent ?? "agent"}</small>
-              </span>
-            </button>
+          {runGroups.map((group) => (
+            <div className="run-group" key={group.label}>
+              <h3>{group.label}</h3>
+              {group.runs.map((run) => (
+                <button className={`run-button ${run.runId === selectedRunId ? "active" : ""}`} key={run.runId} onClick={() => selectRun(run.runId)}>
+                  <span>
+                    <strong>{shortRunId(run.runId)}</strong>
+                    <small>{run.agent ?? "agent"}</small>
+                    <em>{formatShortTime(run.startedAt)} · {runDuration(run)}</em>
+                  </span>
+                  <b className={`status-pill ${statusClass(run.status)}`}>{statusLabel(run.status)}</b>
+                </button>
+              ))}
+            </div>
           ))}
           {!loading && runs.length === 0 ? <div className="empty">No runs found</div> : null}
         </section>
@@ -409,48 +499,67 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Selected Run</p>
-            <h1>{selectedRun?.runId ?? "No run selected"}</h1>
-            <p className="subtle">{selectedRun?.input ?? selectedRun?.startedAt ?? "Run a local agent to populate Studio."}</p>
+            <div className="title-row">
+              <h1>{selectedRun ? shortRunId(selectedRun.runId) : "No run selected"}</h1>
+              {selectedRun ? <span className={`status-pill ${statusClass(selectedRun.status)}`}>{statusLabel(selectedRun.status)}</span> : null}
+            </div>
+            <p className="subtle">{selectedRun?.agent ?? "Agent"} · {selectedRun?.startedAt ? formatTime(selectedRun.startedAt) : "Run a local agent to populate Studio."} · {selectedRun ? runDuration(selectedRun) : ""}</p>
+            <p className="run-input">{selectedRun?.input ?? "Create a run from the CLI to populate the local cockpit."}</p>
           </div>
-          <div className="metrics">
-            <Metric label="Events" value={events.length} />
-            <Metric label="Model" value={modelEvents.length} />
-            <Metric label="Tools" value={toolEvents.length} />
-            <Metric label="Context" value={contextEvents.length} />
+          <div className="top-actions">
+            <button className="action-button" onClick={() => openPanel("replay-diff")}>
+              <Play size={16} />
+              Replay
+            </button>
+            <button className="action-button" onClick={() => openPanel("store")}>
+              <Share2 size={16} />
+              Export
+            </button>
           </div>
         </header>
 
-        <nav className="tabs" aria-label="Studio sections">
-          {panels.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button className={panel === item.key ? "active" : ""} key={item.key} onClick={() => openPanel(item.key)}>
-                <Icon size={16} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <section className="metrics">
+          <Metric label="Events" value={events.length} hint="Total events" icon={Activity} tone="green" />
+          <Metric label="Model" value={modelEvents.length} hint="Model turns" icon={Cpu} tone="purple" />
+          <Metric label="Tools" value={toolCallCount} hint="Tool calls" icon={Wrench} tone="teal" />
+          <Metric label="Context" value={contextSize === undefined ? contextEvents.length : String(contextSize)} hint={contextSize === undefined ? "Snapshots" : "Token estimate"} icon={Layers} tone="blue" />
+        </section>
 
-        {error ? <div className="error">{error}</div> : null}
-        {notice ? <div className="notice">{notice}</div> : null}
-        <section className="content">
-          {panel === "timeline" ? <Timeline events={events} /> : null}
-          {panel === "context" ? <ContextPanel view={asContextView(platformData)} /> : null}
-          {panel === "tools" ? <ToolCalls events={toolEvents} /> : null}
-          {panel === "approvals" ? <ApprovalsPanel approvals={asArray<ApprovalRequest>(platformData)} onDecision={decideApproval} /> : null}
-          {panel === "memory" ? <MemoryPanel memories={asArray<MemoryBlock>(platformData)} onPromote={promoteMemory} /> : null}
-          {panel === "memory-proposals" ? <MemoryProposalsPanel proposals={asArray<MemoryProposal>(platformData)} onPropose={proposeMemory} onReview={reviewMemoryProposal} onPromote={promoteMemoryProposal} /> : null}
-          {panel === "artifacts" ? <ArtifactsPanel artifacts={asArray<ArtifactRecord>(platformData)} detail={artifactDetail} onOpen={openArtifact} /> : null}
-          {panel === "patterns" ? <PatternsPanel view={asPatternCatalogView(platformData)} /> : null}
-          {panel === "replay-diff" ? <ReplayDiffPanel diff={asReplayDiff(platformData)} /> : null}
-          {panel === "conformance" ? <ConformancePanel reports={asArray<ConformanceReport>(platformData)} /> : null}
-          {panel === "guardrails" ? <GuardrailsPanel selectedRunId={selectedRunId} report={asGuardrailReport(platformData)} onScan={scanGuardrail} /> : null}
-          {panel === "store" ? <StorePanel doctor={platformData} result={maintenanceResult} onCompact={compactStore} onBackup={backupStore} onPrune={pruneStore} onPushExport={pushExport} selectedRunId={selectedRunId} /> : null}
-          {panel === "settings" ? (
-            <SettingsPanel view={asConfigView(platformData)} providerResult={maintenanceResult} onPatch={patchSettings} onProviderTest={testProvider} onPolicy={setPolicy} onToolset={setToolset} />
-          ) : null}
-          {panel !== "timeline" && panel !== "context" && panel !== "tools" && panel !== "approvals" && panel !== "memory" && panel !== "memory-proposals" && panel !== "artifacts" && panel !== "patterns" && panel !== "replay-diff" && panel !== "conformance" && panel !== "guardrails" && panel !== "store" && panel !== "settings" ? <JsonPanel value={platformData} /> : null}
+        <section className="studio-card">
+          <nav className="tabs" aria-label="Studio sections">
+            {panels.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button className={panel === item.key ? "active" : ""} key={item.key} onClick={() => openPanel(item.key)}>
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {error ? <div className="error">{error}</div> : null}
+          {notice ? <div className="notice">{notice}</div> : null}
+          <section className="content">
+            {panel === "timeline" ? <Timeline events={events} /> : null}
+            {panel === "workspace-cockpit" ? <WorkspaceCockpitPanel manifest={asWorkspaceManifest(platformData)} selectedRun={selectedRun} events={events} /> : null}
+            {panel === "context" ? <ContextPanel view={asContextView(platformData)} /> : null}
+            {panel === "tools" ? <ToolCalls events={toolEvents} /> : null}
+            {panel === "approvals" ? <ApprovalsPanel approvals={asArray<ApprovalRequest>(platformData)} onDecision={decideApproval} /> : null}
+            {panel === "memory" ? <MemoryPanel memories={asArray<MemoryBlock>(platformData)} onPromote={promoteMemory} /> : null}
+            {panel === "memory-proposals" ? <MemoryProposalsPanel proposals={asArray<MemoryProposal>(platformData)} onPropose={proposeMemory} onReview={reviewMemoryProposal} onPromote={promoteMemoryProposal} /> : null}
+            {panel === "artifacts" ? <ArtifactsPanel artifacts={asArray<ArtifactRecord>(platformData)} detail={artifactDetail} onOpen={openArtifact} /> : null}
+            {panel === "patterns" ? <PatternsPanel view={asPatternCatalogView(platformData)} /> : null}
+            {panel === "inbox" ? <InboxPanel tasks={asArray<InboxTask>(platformData)} /> : null}
+            {panel === "replay-diff" ? <ReplayDiffPanel diff={asReplayDiff(platformData)} /> : null}
+            {panel === "conformance" ? <ConformancePanel reports={asArray<ConformanceReport>(platformData)} /> : null}
+            {panel === "guardrails" ? <GuardrailsPanel selectedRunId={selectedRunId} report={asGuardrailReport(platformData)} onScan={scanGuardrail} /> : null}
+            {panel === "store" ? <StorePanel doctor={platformData} result={maintenanceResult} onCompact={compactStore} onBackup={backupStore} onPrune={pruneStore} onPushExport={pushExport} selectedRunId={selectedRunId} /> : null}
+            {panel === "settings" ? (
+              <SettingsPanel view={asConfigView(platformData)} providerResult={maintenanceResult} onPatch={patchSettings} onProviderTest={testProvider} onPolicy={setPolicy} onToolset={setToolset} />
+            ) : null}
+            {panel !== "workspace-cockpit" && panel !== "timeline" && panel !== "context" && panel !== "tools" && panel !== "approvals" && panel !== "memory" && panel !== "memory-proposals" && panel !== "artifacts" && panel !== "patterns" && panel !== "inbox" && panel !== "replay-diff" && panel !== "conformance" && panel !== "guardrails" && panel !== "store" && panel !== "settings" ? <JsonPanel value={platformData} /> : null}
+          </section>
         </section>
       </main>
     </div>
@@ -462,16 +571,23 @@ function Timeline({ events }: { events: RuntimeEvent[] }) {
   return (
     <div className="timeline">
       {events.map((event) => (
-        <article className="event-card" key={event.id}>
-          <div className="event-head">
-            <span className="event-type">{event.type}</span>
-            <time>{formatTime(event.ts)}</time>
+        <article className={`timeline-row ${eventTone(event)}`} key={event.id}>
+          <time>{formatShortTime(event.ts)}</time>
+          <div className="timeline-dot">
+            <StatusIcon status={eventStatus(event)} />
           </div>
-          <p>{summarizeEvent(event)}</p>
-          <details>
-            <summary>Payload</summary>
-            <pre>{JSON.stringify(event.data, null, 2)}</pre>
-          </details>
+          <div className="timeline-card">
+            <div className="event-head">
+              <span className="event-type">{eventTitle(event)}</span>
+              <span className={`status-pill ${eventTone(event)}`}>{event.type}</span>
+            </div>
+            <p>{summarizeEvent(event)}</p>
+            <div className="meta-line">{eventMetadata(event)}</div>
+            <details>
+              <summary>Payload</summary>
+              <pre>{JSON.stringify(event.data, null, 2)}</pre>
+            </details>
+          </div>
         </article>
       ))}
     </div>
@@ -492,6 +608,72 @@ function ToolCalls({ events }: { events: RuntimeEvent[] }) {
           <pre>{JSON.stringify(event.data, null, 2)}</pre>
         </article>
       ))}
+    </div>
+  );
+}
+
+function WorkspaceCockpitPanel({ manifest, selectedRun, events }: { manifest?: WorkspaceManifest; selectedRun?: RunRecord; events: RuntimeEvent[] }) {
+  if (!manifest) return <div className="empty">Workspace cockpit is loading</div>;
+  const assets = manifest.assets ?? {};
+  const cards = [
+    ["Runs", assets.runs ?? 0],
+    ["Approvals", assets.pendingApprovals ?? 0],
+    ["Memories", assets.memories ?? 0],
+    ["Wiki Pages", assets.wikiPages ?? 0],
+    ["Capabilities", assets.capabilities ?? 0],
+    ["Inbox Tasks", assets.inboxTasks ?? 0]
+  ];
+  return (
+    <div className="cockpit-grid">
+      <section className="event-card cockpit-hero">
+        <div className="event-head">
+          <span className="event-type">{manifest.name}</span>
+          <span className={`pill ${manifest.issues.length === 0 ? "approved" : "pending"}`}>{manifest.issues.length === 0 ? "healthy" : `${manifest.issues.length} issue(s)`}</span>
+        </div>
+        <h2>Workspace Cockpit</h2>
+        <p>{manifest.root}</p>
+        <div className="chip-row">
+          <span className="chip">policy: {manifest.policy}</span>
+          <span className="chip">provider: {manifest.provider.type}</span>
+          <span className="chip">model: {manifest.provider.model ?? "default"}</span>
+        </div>
+      </section>
+      <section className="asset-grid">
+        {cards.map(([label, value]) => (
+          <article className="metric" key={label}>
+            <span>{label}</span>
+            <strong>{String(value)}</strong>
+            <small>Workspace asset</small>
+          </article>
+        ))}
+      </section>
+      <section className="event-card">
+        <div className="event-head">
+          <span className="event-type">Current Run</span>
+          <span className={`pill ${selectedRun ? statusClass(selectedRun.status) : "pending"}`}>{selectedRun ? statusLabel(selectedRun.status) : "none"}</span>
+        </div>
+        <p>{selectedRun?.input ?? "No selected run yet."}</p>
+        <div className="meta-line">{selectedRun?.runId ?? "Run a mock agent to populate this cockpit"} · {events.length} event(s)</div>
+      </section>
+      <section className="event-card">
+        <div className="event-head">
+          <span className="event-type">Provider Route</span>
+          <span className="pill">{String(manifest.provider.route?.provider ?? manifest.provider.type)}</span>
+        </div>
+        <p>{String(manifest.provider.route?.reason ?? "Default route")}</p>
+        <div className="meta-line">fallbacks: {Array.isArray(manifest.provider.route?.fallbackProviders) ? manifest.provider.route?.fallbackProviders.join(", ") : "none"}</div>
+      </section>
+      <section className="event-card">
+        <div className="event-head">
+          <span className="event-type">Toolsets</span>
+          <span className="pill">{manifest.toolsets.length}</span>
+        </div>
+        <div className="chip-row">
+          {manifest.toolsets.map((toolset) => (
+            <span className="chip" key={toolset}>{toolset.replace("@agentbase/", "")}</span>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -809,6 +991,28 @@ function PatternsPanel({ view }: { view?: PatternCatalogView }) {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function InboxPanel({ tasks }: { tasks: InboxTask[] }) {
+  if (tasks.length === 0) return <div className="empty">No inbox tasks found</div>;
+  return (
+    <div className="list-panel">
+      {tasks.map((task) => (
+        <article className="event-card" key={task.id}>
+          <div className="event-head">
+            <span className="event-type">{task.channel} · {task.type}</span>
+            <span className={`pill ${task.status}`}>{task.status}</span>
+          </div>
+          <p>{task.runId ?? "workspace task"} · attempts {task.attempts}</p>
+          <div className="meta-line">{task.id} · {formatTime(task.updatedAt)}</div>
+          <details>
+            <summary>Payload</summary>
+            <pre>{JSON.stringify(task.payload ?? {}, null, 2)}</pre>
+          </details>
+        </article>
+      ))}
     </div>
   );
 }
@@ -1213,11 +1417,17 @@ function JsonConfigSection({
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function Metric({ label, value, hint, icon: Icon = Activity, tone = "green" }: { label: string; value: number | string; hint?: string; icon?: typeof Activity; tone?: "green" | "purple" | "teal" | "blue" }) {
   return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className={`metric ${tone}`}>
+      <div className="metric-icon">
+        <Icon size={20} />
+      </div>
+      <div>
+        <span>{label}</span>
+        <strong>{value}</strong>
+        {hint ? <small>{hint}</small> : null}
+      </div>
     </div>
   );
 }
@@ -1273,6 +1483,13 @@ function asPatternCatalogView(value: unknown): PatternCatalogView | undefined {
   return value as PatternCatalogView;
 }
 
+function asWorkspaceManifest(value: unknown): WorkspaceManifest | undefined {
+  if (!isPlainRecord(value) || typeof value.name !== "string" || !isPlainRecord(value.assets)) {
+    return undefined;
+  }
+  return value as WorkspaceManifest;
+}
+
 function asContextView(value: unknown): ContextView | undefined {
   if (!isPlainRecord(value) || !Array.isArray(value.contexts)) {
     return undefined;
@@ -1319,6 +1536,86 @@ function parseJsonInput(value: string): Record<string, unknown> {
 function searchParams(query: string): string {
   const trimmed = query.trim();
   return trimmed ? `?q=${encodeURIComponent(trimmed)}` : "";
+}
+
+function groupRunsByDay(runs: RunRecord[]): Array<{ label: string; runs: RunRecord[] }> {
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString();
+  const buckets = new Map<string, RunRecord[]>();
+  for (const run of runs) {
+    const date = run.startedAt ? new Date(run.startedAt) : undefined;
+    const label = !date || Number.isNaN(date.getTime()) ? "Earlier" : date.toDateString() === today ? "Today" : date.toDateString() === yesterday ? "Yesterday" : "Earlier";
+    buckets.set(label, [...(buckets.get(label) ?? []), run]);
+  }
+  return ["Today", "Yesterday", "Earlier"].flatMap((label) => {
+    const bucket = buckets.get(label) ?? [];
+    return bucket.length > 0 ? [{ label, runs: bucket }] : [];
+  });
+}
+
+function shortRunId(runId: string): string {
+  return runId.length > 18 ? `${runId.slice(0, 10)}...${runId.slice(-4)}` : runId;
+}
+
+function runDuration(run: RunRecord): string {
+  if (!run.startedAt) return "n/a";
+  const started = new Date(run.startedAt).getTime();
+  const ended = run.completedAt ? new Date(run.completedAt).getTime() : Date.now();
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return "n/a";
+  const seconds = Math.round((ended - started) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}m ${rest}s`;
+}
+
+function statusLabel(status: string): string {
+  if (status === "waiting_approval") return "Waiting";
+  return status ? status[0].toUpperCase() + status.slice(1) : "Unknown";
+}
+
+function statusClass(status: string): string {
+  if (status === "completed") return "approved";
+  if (status === "failed" || status === "cancelled") return "denied";
+  if (status === "waiting_approval") return "pending";
+  return "running";
+}
+
+function eventStatus(event: RuntimeEvent): string {
+  if (event.type.includes("failed") || event.type.includes("rejected") || event.type.includes("denied")) return "failed";
+  if (event.type.includes("approval") || event.type.includes("waiting")) return "waiting_approval";
+  if (event.type.includes("started") || event.type.includes("resumed")) return "running";
+  return "completed";
+}
+
+function eventTone(event: RuntimeEvent): string {
+  if (event.type.includes("failed") || event.type.includes("rejected") || event.type.includes("denied")) return "denied";
+  if (event.type.includes("approval") || event.type.includes("waiting")) return "pending";
+  if (event.type.startsWith("tool.")) return "tool";
+  if (event.type.startsWith("model.")) return "model";
+  if (event.type.startsWith("context.")) return "context";
+  return "approved";
+}
+
+function eventTitle(event: RuntimeEvent): string {
+  const name = event.data.name ?? event.data.toolName ?? event.data.agent ?? event.data.status;
+  return name ? `${event.type}: ${String(name)}` : event.type;
+}
+
+function eventMetadata(event: RuntimeEvent): string {
+  const parts = [
+    typeof event.data.durationMs === "number" ? `${event.data.durationMs}ms` : undefined,
+    typeof event.data.attempt === "number" ? `attempt ${event.data.attempt}` : undefined,
+    typeof event.data.finishReason === "string" ? event.data.finishReason : undefined,
+    typeof event.data.approvalId === "string" ? event.data.approvalId : undefined
+  ].filter(Boolean);
+  return parts.join(" · ") || event.id;
+}
+
+function formatShortTime(value?: string): string {
+  if (!value) return "n/a";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function summarizeEvent(event: RuntimeEvent): string {

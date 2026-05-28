@@ -33,6 +33,7 @@
     "@agentbase/provider-litellm": "workspace:*",
     "@agentbase/provider-ollama": "workspace:*",
     "@agentbase/provider-openai-compatible": "workspace:*",
+    "@agentbase/provider-router": "workspace:*",
     "@agentbase/relay": "workspace:*",
     "@agentbase/replay": "workspace:*",
     "@agentbase/server": "workspace:*",
@@ -46,6 +47,7 @@
     "@agentbase/tools-web": "workspace:*",
     "@agentbase/tools-shell": "workspace:*",
     "@agentbase/trace": "workspace:*",
+    "@agentbase/workspace": "workspace:*",
     "@agentbase/wiki": "workspace:*"
   },
   "scripts": {

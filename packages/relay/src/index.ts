@@ -55,6 +55,29 @@ export class JsonRelayMailbox implements RelayMailbox {
     }));
   }
 
+  async markRunning(id: string): Promise<RelayMessage> {
+    return this.update(id, (message, now) => ({
+      ...message,
+      status: "running",
+      attempts: message.attempts + 1,
+      runningAt: now,
+      updatedAt: now
+    }));
+  }
+
+  async markWaitingApproval(id: string, approvalId?: string): Promise<RelayMessage> {
+    return this.update(id, (message, now) => ({
+      ...message,
+      status: "waiting_approval",
+      waitingApprovalAt: now,
+      updatedAt: now,
+      metadata: {
+        ...(message.metadata ?? {}),
+        approvalId
+      }
+    }));
+  }
+
   async acknowledge(id: string): Promise<RelayMessage> {
     return this.update(id, (message, now) => ({
       ...message,

@@ -94,6 +94,9 @@ importers:
       '@agentbase/provider-openai-compatible':
         specifier: workspace:*
         version: link:../provider-openai-compatible
+      '@agentbase/provider-router':
+        specifier: workspace:*
+        version: link:../provider-router
       '@agentbase/relay':
         specifier: workspace:*
         version: link:../relay
@@ -136,6 +139,9 @@ importers:
       '@agentbase/wiki':
         specifier: workspace:*
         version: link:../wiki
+      '@agentbase/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/code-index:
     dependencies:
@@ -244,6 +250,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/provider-router:
+    dependencies:
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/relay:
     dependencies:
       '@agentbase/core':
@@ -267,6 +279,9 @@ importers:
       '@agentbase/patterns':
         specifier: workspace:*
         version: link:../patterns
+      '@agentbase/provider-router':
+        specifier: workspace:*
+        version: link:../provider-router
       '@agentbase/relay':
         specifier: workspace:*
         version: link:../relay
@@ -279,6 +294,9 @@ importers:
       '@agentbase/trace':
         specifier: workspace:*
         version: link:../trace
+      '@agentbase/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/stores-sqlite:
     dependencies:
@@ -297,6 +315,12 @@ importers:
       '@agentbase/patterns':
         specifier: workspace:*
         version: link:../patterns
+      '@agentbase/provider-router':
+        specifier: workspace:*
+        version: link:../provider-router
+      '@agentbase/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@agentbase/replay':
         specifier: workspace:*
         version: link:../replay
@@ -309,6 +333,9 @@ importers:
       '@agentbase/trace':
         specifier: workspace:*
         version: link:../trace
+      '@agentbase/workspace':
+        specifier: workspace:*
+        version: link:../workspace
 
   packages/studio-ui:
     dependencies:
@@ -400,6 +427,15 @@ importers:
       '@agentbase/memory':
         specifier: workspace:*
         version: link:../memory
+
+  packages/workspace:
+    dependencies:
+      '@agentbase/config':
+        specifier: workspace:*
+        version: link:../config
+      '@agentbase/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

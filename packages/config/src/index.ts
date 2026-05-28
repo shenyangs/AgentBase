@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BrowserToolConfig, DatabaseConnectionConfig, EvalCase, HttpToolConfig, McpServerConfig, PolicyName, RuntimeLimits } from "@agentbase/core";
+import type { BrowserToolConfig, DatabaseConnectionConfig, EvalCase, HttpToolConfig, McpServerConfig, PolicyName, ProviderRouteRule, RuntimeLimits } from "@agentbase/core";
 
 export type ExportDestinationConfig = {
   name: string;
@@ -42,6 +42,16 @@ export type AgentBaseConfig = {
   name: string;
   workspaceRoot: string;
   provider: ProviderSettings;
+  providers?: {
+    default?: string;
+    routes?: ProviderRouteRule[];
+    fallbacks?: string[];
+    budget?: {
+      maxCostUsd?: number;
+      preferredCheapProvider?: string;
+      preferredStrongProvider?: string;
+    };
+  };
   search?: {
     type: "none" | "static" | "http";
     endpoint?: string;
@@ -166,6 +176,20 @@ export function validateConfig(config: AgentBaseConfig): ConfigIssue[] {
   }
   if (config.provider?.type !== "mock" && !config.provider?.model) {
     error("provider.model", "provider.model is required for non-mock providers");
+  }
+  if (config.providers?.routes !== undefined && !Array.isArray(config.providers.routes)) {
+    error("providers.routes", "providers.routes must be an array when present");
+  }
+  for (const [index, route] of (config.providers?.routes ?? []).entries()) {
+    const prefix = `providers.routes[${index}]`;
+    if (!route.id) error(`${prefix}.id`, "provider route id is required");
+    if (!route.provider) error(`${prefix}.provider`, "provider route provider is required");
+    if (route.match?.keywords !== undefined && (!Array.isArray(route.match.keywords) || !route.match.keywords.every((item) => typeof item === "string"))) {
+      error(`${prefix}.match.keywords`, "provider route keywords must be strings");
+    }
+    if (route.match?.taskTypes !== undefined && (!Array.isArray(route.match.taskTypes) || !route.match.taskTypes.every((item) => typeof item === "string"))) {
+      error(`${prefix}.match.taskTypes`, "provider route taskTypes must be strings");
+    }
   }
   if (!["read-only", "workspace-write", "developer", "trusted"].includes(config.policy)) {
     error("policy", "policy must be read-only, workspace-write, developer, or trusted");
@@ -329,6 +353,27 @@ export function defaultConfig(name: string): AgentBaseConfig {
     provider: {
       type: "mock",
       model: "mock/repo-analyst"
+    },
+    providers: {
+      default: "mock",
+      routes: [
+        {
+          id: "local-cheap-default",
+          provider: "mock",
+          model: "mock/repo-analyst",
+          reason: "Default local-first route for deterministic development and tests.",
+          match: { risk: "low" }
+        },
+        {
+          id: "strong-review-route",
+          provider: "mock",
+          model: "mock/repo-analyst",
+          reason: "Use the strongest configured provider for high-risk, eval-important, or approval-heavy tasks.",
+          match: { risk: "high" }
+        }
+      ],
+      fallbacks: ["mock"],
+      budget: {}
     },
     policy: "workspace-write",
     tools: ["@agentbase/tools-fs", "@agentbase/tools-shell", "@agentbase/tools-git", "@agentbase/code-index"],

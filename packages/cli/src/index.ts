@@ -53,7 +53,7 @@ import { loadEvalSuite, runEvalSuite, summarizeEvalResults } from "@agentbase/ev
 import { gateEvolutionProposal, proposeEvolutionFromTrace } from "@agentbase/evolution";
 import { JsonExperienceLedger, experienceLedgerFile } from "@agentbase/experience";
 import { scanRuntimeEvents, scanTextForGuardrails, summarizeGuardrailResults } from "@agentbase/guardrails";
-import { JsonMemoryProposalStore, JsonMemoryStore, createMemoryTools } from "@agentbase/memory";
+import { JsonMemoryLineageStore, JsonMemoryProposalStore, JsonMemoryStore, createMemoryTools, draftMemoryProposalFromRun, memoryLineageFile } from "@agentbase/memory";
 import { listMcpServerTools, loadMcpServerTools } from "@agentbase/mcp";
 import { createOrchestrationPlan, createRuntimeWorkflowExecutor, defaultAgentSpecs } from "@agentbase/orchestrator";
 import {
@@ -70,6 +70,7 @@ import {
 import { createLiteLLMProvider } from "@agentbase/provider-litellm";
 import { createOllamaProvider } from "@agentbase/provider-ollama";
 import { createOpenAICompatibleProvider } from "@agentbase/provider-openai-compatible";
+import { routeProvider } from "@agentbase/provider-router";
 import { JsonRelayMailbox, relayMailboxFile } from "@agentbase/relay";
 import { diffReplay, extractReplayOutput, loadReplayTrace, replayRun, summarizeReplay } from "@agentbase/replay";
 import { startAgentBaseServer } from "@agentbase/server";
@@ -83,6 +84,7 @@ import { createHttpTools } from "@agentbase/tools-http";
 import { createShellTool } from "@agentbase/tools-shell";
 import { createHttpSearchProvider, createStaticSearchProvider, createWebTools } from "@agentbase/tools-web";
 import { JsonlTraceStore, serializeTraceExport, type TraceExportFormat } from "@agentbase/trace";
+import { createWorkspaceManifest, doctorWorkspace, summarizeWorkspaceAssets } from "@agentbase/workspace";
 import { RepoWiki } from "@agentbase/wiki";
 
 type GovernanceEventType = "config.updated" | "provider.tested" | "toolset.enabled" | "toolset.disabled" | "toolset.configured" | "policy.updated";
@@ -131,6 +133,9 @@ export async function main(argv = process.argv.slice(2), io: CliIo = defaultIo):
     case "provider":
       await commandProvider(rest, io);
       return;
+    case "workspace":
+      await commandWorkspace(rest, io);
+      return;
     case "patterns":
       await commandPatterns(rest, io);
       return;
@@ -148,6 +153,9 @@ export async function main(argv = process.argv.slice(2), io: CliIo = defaultIo):
       return;
     case "relay":
       await commandRelay(rest, io);
+      return;
+    case "inbox":
+      await commandInbox(rest, io);
       return;
     case "replay":
       await commandReplay(rest, io);
@@ -175,6 +183,9 @@ export async function main(argv = process.argv.slice(2), io: CliIo = defaultIo):
       return;
     case "backup":
       await commandBackup(rest, io);
+      return;
+    case "demo":
+      await commandDemo(rest, io);
       return;
     case "conformance":
       await commandConformance(rest, io);
@@ -773,7 +784,95 @@ async function commandProvider(args: string[], io: CliIo): Promise<void> {
     return;
   }
 
-  throw new Error("Usage: agentbase provider show|set|test");
+  if (subcommand === "route") {
+    const action = parsed.positionals[0];
+    const task = parsed.positionals.slice(1).join(" ").trim();
+    if (action !== "test" || !task) {
+      throw new Error('Usage: agentbase provider route test "<task>" [--risk low|medium|high] [--contextTokens <n>] [--evalImportance low|normal|high]');
+    }
+    const decision = routeProvider({
+      task,
+      risk: typeof parsed.flags.risk === "string" ? (parsed.flags.risk as never) : undefined,
+      contextTokens: Number(parsed.flags.contextTokens ?? 0),
+      evalImportance: typeof parsed.flags.evalImportance === "string" ? (parsed.flags.evalImportance as never) : undefined,
+      defaultProvider: config.providers?.default ?? config.provider.type,
+      defaultModel: config.provider.model,
+      routes: config.providers?.routes,
+      fallbacks: config.providers?.fallbacks,
+      budgetUsd: config.providers?.budget?.maxCostUsd
+    });
+    const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+    await platform?.write({ id: createId("evt"), runId: "provider-route", type: "provider.route.checked", ts: new Date().toISOString(), data: { task, decision } });
+    await platform?.write({ id: createId("evt"), runId: "provider-route", type: "provider.route.selected", ts: new Date().toISOString(), data: decision });
+    await platform?.writeAudit({ action: "provider.route.selected", target: decision.provider, actor: "cli", metadata: decision });
+    await platform?.close();
+    io.stdout(JSON.stringify(decision, null, 2));
+    return;
+  }
+
+  if (subcommand === "costs") {
+    const runId = typeof parsed.flags.run === "string" ? parsed.flags.run : parsed.positionals[0];
+    const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+    const events = runId && platform ? await platform.readRun(runId) : [];
+    const usage = summarizeProviderCosts(events);
+    if (platform && runId) {
+      await platform.write({ id: createId("evt"), runId, type: "provider.cost.recorded", ts: new Date().toISOString(), data: usage });
+      await platform.writeAudit({ action: "provider.cost.recorded", target: runId, runId, actor: "cli", metadata: usage });
+    }
+    await platform?.close();
+    io.stdout(JSON.stringify(usage, null, 2));
+    return;
+  }
+
+  throw new Error("Usage: agentbase provider show|set|test|route|costs");
+}
+
+async function commandWorkspace(args: string[], io: CliIo): Promise<void> {
+  const [subcommand = "show", ...rest] = args;
+  const parsed = parseFlags(rest);
+  const cwd = path.resolve(process.cwd(), String(parsed.flags.cwd ?? "."));
+  const config = await loadConfig(cwd);
+  const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+  const recentRuns = platform ? await platform.listRuns({ limit: Number(parsed.flags.limit ?? 10) }) : [];
+  const pendingApprovals = platform ? (await platform.listApprovals({ status: "pending", limit: 10_000 })).length : 0;
+
+  if (subcommand === "show") {
+    const manifest = await createWorkspaceManifest({ cwd, config, recentRuns, pendingApprovals });
+    manifest.provider.route = routeProvider({
+      task: "workspace cockpit",
+      defaultProvider: config.providers?.default ?? config.provider.type,
+      defaultModel: config.provider.model,
+      routes: config.providers?.routes,
+      fallbacks: config.providers?.fallbacks,
+      budgetUsd: config.providers?.budget?.maxCostUsd
+    });
+    await platform?.write({ id: createId("evt"), runId: "workspace", type: "workspace.checked", ts: new Date().toISOString(), data: { name: manifest.name, root: manifest.root, issues: manifest.issues } });
+    await platform?.writeAudit({ action: "workspace.checked", target: manifest.root, actor: "cli", metadata: { issues: manifest.issues.length } });
+    io.stdout(JSON.stringify(manifest, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "doctor") {
+    const checks = await doctorWorkspace({ cwd, config });
+    await platform?.write({ id: createId("evt"), runId: "workspace", type: "workspace.checked", ts: new Date().toISOString(), data: { checks } });
+    await platform?.writeAudit({ action: "workspace.checked", target: cwd, actor: "cli", metadata: { ok: checks.every((check) => check.ok) } });
+    io.stdout(JSON.stringify({ ok: checks.every((check) => check.ok), checks }, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "assets") {
+    const assets = await summarizeWorkspaceAssets({ cwd, config, recentRuns, pendingApprovals });
+    await platform?.write({ id: createId("evt"), runId: "workspace", type: "workspace.assets.listed", ts: new Date().toISOString(), data: assets });
+    await platform?.writeAudit({ action: "workspace.assets.listed", target: cwd, actor: "cli", metadata: assets });
+    io.stdout(JSON.stringify(assets, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  await platform?.close();
+  throw new Error("Usage: agentbase workspace show|doctor|assets");
 }
 
 async function commandPatterns(args: string[], io: CliIo): Promise<void> {
@@ -856,6 +955,7 @@ async function commandMemory(args: string[], io: CliIo): Promise<void> {
   const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
   const store = loadMemoryStore(cwd, config, platform);
   const proposalStore = loadMemoryProposalStore(cwd, config, store, platform);
+  const lineageStore = new JsonMemoryLineageStore({ file: memoryLineageFile(cwd, config.stores?.memoryFile ?? ".agentbase/memory/memory.json") });
 
   if (subcommand === "add") {
     const text = parsed.positionals.join(" ").trim();
@@ -882,6 +982,7 @@ async function commandMemory(args: string[], io: CliIo): Promise<void> {
     const id = parsed.positionals[0];
     if (!id) throw new Error("Usage: agentbase memory promote <id>");
     const memory = await store.promote(id);
+    await lineageStore.link({ memoryId: memory.id, promotedAt: new Date().toISOString(), metadata: { source: "memory.promote" } });
     io.stdout(`${memory.id}\tpromoted`);
     await platform?.close();
     return;
@@ -900,7 +1001,46 @@ async function commandMemory(args: string[], io: CliIo): Promise<void> {
       rationale: typeof parsed.flags.rationale === "string" ? parsed.flags.rationale : "Proposed through CLI for reviewed memory promotion.",
       evidence: typeof parsed.flags.evidence === "string" ? [{ type: "user", summary: parsed.flags.evidence }] : undefined
     });
+    await lineageStore.link({ proposalId: proposal.id, sourceRunId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined, metadata: { source: "memory.propose" } });
+    await platform?.write({ id: createId("evt"), runId: typeof parsed.flags.run === "string" ? parsed.flags.run : "memory", type: "memory.lineage.linked", ts: new Date().toISOString(), data: { proposalId: proposal.id } });
     io.stdout(`${proposal.id}\t${proposal.status}\t${proposal.memory.scope}\t${proposal.memory.text}`);
+    await platform?.close();
+    return;
+  }
+  if (subcommand === "curate") {
+    const runId = typeof parsed.flags.run === "string" ? parsed.flags.run : parsed.positionals[0];
+    if (!runId) throw new Error("Usage: agentbase memory curate --run <run-id>");
+    const events = platform ? await platform.readRun(runId) : await loadReplayEvents(runId, cwd, config, platform);
+    if (events.length === 0) throw new Error(`No trace events found for run: ${runId}`);
+    const proposal = await proposalStore.propose(draftMemoryProposalFromRun(events, runId));
+    await lineageStore.link({
+      proposalId: proposal.id,
+      sourceRunId: runId,
+      sourceEventId: events.at(-1)?.id,
+      metadata: { source: "memory.curate" }
+    });
+    await platform?.write({ id: createId("evt"), runId, type: "memory.curate.proposed", ts: new Date().toISOString(), data: { proposalId: proposal.id, memory: proposal.memory } });
+    await platform?.writeAudit({ action: "memory.curate.proposed", target: proposal.id, runId, actor: "cli", metadata: { sourceRunId: runId } });
+    io.stdout(JSON.stringify(proposal, null, 2));
+    await platform?.close();
+    return;
+  }
+  if (subcommand === "lineage") {
+    const id = parsed.positionals[0];
+    const lineages = id
+      ? [...(await lineageStore.list({ memoryId: id })), ...(await lineageStore.list({ proposalId: id }))]
+      : await lineageStore.list({ runId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined });
+    io.stdout(JSON.stringify(lineages, null, 2));
+    await platform?.close();
+    return;
+  }
+  if (subcommand === "supersede") {
+    const id = parsed.positionals[0];
+    if (!id) throw new Error("Usage: agentbase memory supersede <memory-id> [--by <memory-id>]");
+    const lineage = await lineageStore.supersede(id, typeof parsed.flags.by === "string" ? parsed.flags.by : undefined);
+    await platform?.write({ id: createId("evt"), runId: "memory", type: "memory.superseded", ts: new Date().toISOString(), data: lineage });
+    await platform?.writeAudit({ action: "memory.superseded", target: id, actor: "cli", metadata: lineage });
+    io.stdout(JSON.stringify(lineage, null, 2));
     await platform?.close();
     return;
   }
@@ -928,11 +1068,20 @@ async function commandMemory(args: string[], io: CliIo): Promise<void> {
     const id = parsed.positionals[0];
     if (!id) throw new Error("Usage: agentbase memory promote-proposal <proposal-id>");
     const result = await proposalStore.promoteProposal(id);
+    await lineageStore.link({
+      memoryId: result.memory.id,
+      proposalId: result.proposal.id,
+      sourceRunId: result.memory.metadata?.sourceRunId as string | undefined,
+      promotedAt: new Date().toISOString(),
+      reviewedBy: result.proposal.reviewedBy,
+      metadata: { source: "memory.promote-proposal" }
+    });
+    await platform?.write({ id: createId("evt"), runId: (result.memory.metadata?.sourceRunId as string | undefined) ?? "memory", type: "memory.lineage.linked", ts: new Date().toISOString(), data: { memoryId: result.memory.id, proposalId: result.proposal.id } });
     io.stdout(`${result.proposal.id}\tpromoted\t${result.memory.id}`);
     await platform?.close();
     return;
   }
-  throw new Error("Usage: agentbase memory list|search|add|promote|propose|proposals|review|promote-proposal");
+  throw new Error("Usage: agentbase memory list|search|add|promote|propose|curate|lineage|supersede|proposals|review|promote-proposal");
 }
 
 async function commandWiki(args: string[], io: CliIo): Promise<void> {
@@ -1173,6 +1322,68 @@ async function commandRelay(args: string[], io: CliIo): Promise<void> {
 
   await platform?.close();
   throw new Error("Usage: agentbase relay send|list|deliver|ack|fail|cancel");
+}
+
+async function commandInbox(args: string[], io: CliIo): Promise<void> {
+  const [subcommand = "list", ...rest] = args;
+  const parsed = parseFlags(rest);
+  const cwd = path.resolve(process.cwd(), String(parsed.flags.cwd ?? "."));
+  const config = await loadConfig(cwd);
+  const platform = isSqliteConfig(config) ? loadPlatformStore(cwd, config) : undefined;
+  const mailbox = new JsonRelayMailbox({ file: relayMailboxFile(cwd) });
+
+  if (subcommand === "list") {
+    const messages = await mailbox.list({
+      channel: typeof parsed.flags.channel === "string" ? parsed.flags.channel : undefined,
+      status: typeof parsed.flags.status === "string" ? (parsed.flags.status as never) : undefined,
+      runId: typeof parsed.flags.run === "string" ? parsed.flags.run : undefined,
+      limit: Number(parsed.flags.limit ?? 50)
+    });
+    io.stdout(JSON.stringify(messages, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "show") {
+    const id = parsed.positionals[0];
+    if (!id) throw new Error("Usage: agentbase inbox show <message-id>");
+    io.stdout(JSON.stringify((await mailbox.get(id)) ?? null, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "retry") {
+    const id = parsed.positionals[0];
+    if (!id) throw new Error("Usage: agentbase inbox retry <message-id>");
+    const current = await mailbox.get(id);
+    if (!current) throw new Error(`Inbox task not found: ${id}`);
+    const retry = await mailbox.send({
+      ...current,
+      id: undefined,
+      status: "queued",
+      attempts: 0,
+      metadata: { ...(current.metadata ?? {}), retriedFrom: current.id }
+    });
+    await platform?.write({ id: createId("evt"), runId: retry.runId ?? "inbox", type: "inbox.queued", ts: new Date().toISOString(), data: retry });
+    await platform?.writeAudit({ action: "inbox.queued", target: retry.id, runId: retry.runId, actor: "cli", metadata: { retriedFrom: current.id } });
+    io.stdout(JSON.stringify(retry, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  if (subcommand === "cancel") {
+    const id = parsed.positionals[0];
+    if (!id) throw new Error("Usage: agentbase inbox cancel <message-id> [--reason <text>]");
+    const message = await mailbox.cancel(id, typeof parsed.flags.reason === "string" ? parsed.flags.reason : "inbox task cancelled");
+    await platform?.write({ id: createId("evt"), runId: message.runId ?? "inbox", type: "inbox.cancelled", ts: new Date().toISOString(), data: message });
+    await platform?.writeAudit({ action: "inbox.cancelled", target: message.id, runId: message.runId, actor: "cli", metadata: { reason: message.error } });
+    io.stdout(JSON.stringify(message, null, 2));
+    await platform?.close();
+    return;
+  }
+
+  await platform?.close();
+  throw new Error("Usage: agentbase inbox list|show|retry|cancel");
 }
 
 async function commandReplay(args: string[], io: CliIo): Promise<void> {
@@ -1563,6 +1774,33 @@ async function commandBackup(args: string[], io: CliIo): Promise<void> {
   io.stdout(out);
 }
 
+async function commandDemo(args: string[], io: CliIo): Promise<void> {
+  const parsed = parseFlags(args);
+  const target = path.resolve(process.cwd(), typeof parsed.flags.target === "string" ? parsed.flags.target : parsed.positionals[0] ?? path.join(tmpdir(), `agentbase-demo-${Date.now()}`));
+  await commandInit([target], { stdout: () => undefined, stderr: io.stderr });
+  await commandProvider(["set", "mock", "--model", "mock/repo-analyst", "--cwd", target], { stdout: () => undefined, stderr: io.stderr });
+  const runOutput = await captureCliOutput((inner) => commandRun(["summarize this workspace", "--mock", "--cwd", target], inner));
+  const runId = parseRunId(runOutput);
+  await commandMemory(["curate", "--run", runId, "--cwd", target], { stdout: () => undefined, stderr: io.stderr });
+  const workspaceOutput = await captureCliOutput((inner) => commandWorkspace(["show", "--cwd", target], inner));
+  io.stdout(
+    JSON.stringify(
+      {
+        workspace: target,
+        runId,
+        quickstart: [
+          `pnpm agentbase trace show ${runId} --cwd ${target}`,
+          `pnpm agentbase workspace show --cwd ${target}`,
+          `pnpm agentbase studio --cwd ${target}`
+        ],
+        cockpit: JSON.parse(workspaceOutput)
+      },
+      null,
+      2
+    )
+  );
+}
+
 async function commandConformance(args: string[], io: CliIo): Promise<void> {
   const [subcommand = "run", ...rest] = args;
   if (subcommand !== "run") throw new Error("Usage: agentbase conformance run [--cwd <dir>] [--run <run-id>]");
@@ -1596,6 +1834,10 @@ async function commandConformance(args: string[], io: CliIo): Promise<void> {
     conformanceCheck("approval.checkpoint_contract", hasApprovalCheckpointContract(events), "approval runs include durable pending/completed tool-call checkpoint state"),
     conformanceCheck("approval.resume_or_decision", hasApprovalResumeOrDecision(events), "approval runs record waiting checkpoint plus an approval decision or reuse event"),
     conformanceCheck("audit.config_mutations", audit.some((entry) => ["config.updated", "policy.updated", "toolset.enabled", "toolset.disabled", "toolset.configured", "provider.tested"].includes(entry.action)), "governance mutations are auditable"),
+    conformanceCheck("workspace.control_plane", audit.some((entry) => entry.action === "workspace.checked" || entry.action === "workspace.assets.listed"), "workspace cockpit and asset inspection are auditable"),
+    conformanceCheck("provider.route_audit", audit.some((entry) => entry.action === "provider.route.selected"), "provider route decisions are auditable"),
+    conformanceCheck("inbox.control_plane", audit.some((entry) => entry.action.startsWith("inbox.") || entry.action.startsWith("relay.")), "inbox/relay task transitions are auditable"),
+    conformanceCheck("memory.curate_lineage", audit.some((entry) => entry.action === "memory.curate.proposed") || hasEvent(events, "memory.curate.proposed"), "memory curate creates an auditable proposal"),
     conformanceCheck("audit.export_push", hasExportPushAuditContract(audit, config), "configured export destinations produce audited push results"),
     conformanceCheck("audit.evolution_promotion", hasEvolutionPromotionAuditContract(audit), "evolution promotion and rollback are auditable when used")
   ];
@@ -1665,6 +1907,45 @@ function parseRunId(output: string): string {
     throw new Error(`Could not parse pattern run id from:\n${output}`);
   }
   return match[1];
+}
+
+function summarizeProviderCosts(events: RuntimeEvent[]): {
+  modelEvents: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  byProvider: Array<{ provider: string; model?: string; modelEvents: number; totalTokens: number; costUsd: number }>;
+} {
+  const groups = new Map<string, { provider: string; model?: string; modelEvents: number; totalTokens: number; costUsd: number }>();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  let costUsd = 0;
+  let modelEvents = 0;
+  for (const event of events) {
+    if (event.type !== "model.completed") continue;
+    modelEvents += 1;
+    const usage = isRecord(event.data.usage) ? event.data.usage : {};
+    const metadata = isRecord(event.data.metadata) ? event.data.metadata : {};
+    const provider = typeof metadata.provider === "string" ? metadata.provider : "unknown";
+    const model = typeof metadata.model === "string" ? metadata.model : undefined;
+    const key = `${provider}:${model ?? ""}`;
+    const group = groups.get(key) ?? { provider, model, modelEvents: 0, totalTokens: 0, costUsd: 0 };
+    const input = Number(usage.inputTokens ?? 0);
+    const output = Number(usage.outputTokens ?? 0);
+    const total = Number(usage.totalTokens ?? input + output);
+    const cost = Number(usage.costUsd ?? 0);
+    inputTokens += input;
+    outputTokens += output;
+    totalTokens += total;
+    costUsd += cost;
+    group.modelEvents += 1;
+    group.totalTokens += total;
+    group.costUsd += cost;
+    groups.set(key, group);
+  }
+  return { modelEvents, inputTokens, outputTokens, totalTokens, costUsd, byProvider: [...groups.values()] };
 }
 
 async function scaffoldReferencePattern(pattern: ReferencePattern, targetDir: string, force: boolean): Promise<void> {
@@ -2420,11 +2701,13 @@ function helpText(): string {
     "",
     "Commands:",
     "  agentbase init [target]",
+    "  agentbase demo [target|--target <dir>]",
     "  agentbase run <prompt> --mock [--cwd <dir>] [--session <id>] [--resume <run-id>]",
     "  agentbase run cancel <run-id> [--cwd <dir>] [--reason <text>]",
     "  agentbase config show|doctor|set [--cwd <dir>]",
     "  agentbase policy show|set [--cwd <dir>]",
-    "  agentbase provider show|set|test [--cwd <dir>]",
+    "  agentbase provider show|set|test|route|costs [--cwd <dir>]",
+    "  agentbase workspace show|doctor|assets [--cwd <dir>]",
     "  agentbase patterns list|show|init|eval",
     "  agentbase store migrate|doctor|compact|prune [--cwd <dir>] [--days <n>] [--keep-last <n>] [--dry-run]",
     "  agentbase tools list|inspect|enable|disable [--cwd <dir>]",
@@ -2434,11 +2717,12 @@ function helpText(): string {
     "  agentbase tools browser doctor [--cwd <dir>]",
     "  agentbase session list|show|pause|resume [--cwd <dir>]",
     "  agentbase approval list|show|approve|deny [--cwd <dir>]",
-    "  agentbase memory list|search|add|promote|propose|proposals|review|promote-proposal [--cwd <dir>]",
+    "  agentbase memory list|search|add|promote|propose|curate|lineage|supersede|proposals|review|promote-proposal [--cwd <dir>]",
     "  agentbase wiki index|query|open [--cwd <dir>]",
     "  agentbase experience event|atom|lesson|list [--cwd <dir>]",
     "  agentbase capability draft|promote|list [--cwd <dir>]",
     "  agentbase relay send|list|deliver|ack|fail|cancel [--cwd <dir>]",
+    "  agentbase inbox list|show|retry|cancel [--cwd <dir>]",
     "  agentbase replay run|diff <run-id-or-jsonl> [--cwd <dir>]",
     "  agentbase eval run [--suite <file>] [--run <run-id-or-jsonl>] [--output <text>] [--cwd <dir>]",
     "  agentbase evolve propose|test|promote|rollback [--suite <file>] [--run <run-id-or-jsonl>] [--cwd <dir>]",

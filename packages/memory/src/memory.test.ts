@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { JsonMemoryProposalStore, JsonMemoryStore } from "./index";
+import { JsonMemoryLineageStore, JsonMemoryProposalStore, JsonMemoryStore, draftMemoryProposalFromRun } from "./index";
 
 describe("JsonMemoryStore", () => {
   it("adds, searches, and promotes memory", async () => {
@@ -31,5 +31,21 @@ describe("JsonMemoryStore", () => {
     expect(promoted.memory.promoted).toBe(true);
     expect(promoted.memory.pinned).toBe(true);
     expect((await memoryStore.search("eval-gated"))[0].id).toBe(promoted.memory.id);
+  });
+
+  it("tracks lineage and drafts curate proposals from run events", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "agentbase-memory-lineage-"));
+    const lineageStore = new JsonMemoryLineageStore({ file: path.join(dir, "lineage.json") });
+    await lineageStore.link({ proposalId: "prop_1", sourceRunId: "run_1", sourceEventId: "evt_1" });
+    await lineageStore.markUsed("mem_1", "run_2");
+    const superseded = await lineageStore.supersede("mem_1", "mem_2");
+    const draft = draftMemoryProposalFromRun(
+      [{ id: "evt_1", runId: "run_1", type: "model.completed", ts: new Date().toISOString(), data: { outputPreview: "Reusable evidence from a run." } }],
+      "run_1"
+    );
+
+    expect((await lineageStore.list({ proposalId: "prop_1" }))[0].sourceRunId).toBe("run_1");
+    expect(superseded.supersededBy).toBe("mem_2");
+    expect(draft.memory.source).toBe("run_1");
   });
 });

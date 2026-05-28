@@ -1,13 +1,16 @@
 import { RUNTIME_EVENT_TYPES } from "@agentbase/core";
 import type {
   ContextSnapshot,
+  LifecycleHookManifest,
   ModelProvider,
+  ProviderRouteDecision,
   RelayMailbox,
   RelayMessage,
   RuntimeEvent,
   SpecialistManifest,
   Tool,
   ToolResultEnvelope,
+  WorkspaceManifest,
   WorkflowExecutionResult
 } from "@agentbase/core";
 
@@ -246,11 +249,13 @@ export function validateRelayMessageContract(message: RelayMessage, name = `rela
   if (!nonEmptyString(message.channel)) error("channel", "message.channel must be a non-empty string");
   if (!nonEmptyString(message.type)) error("type", "message.type must be a non-empty string");
   if (!isRecord(message.payload)) error("payload", "message.payload must be an object");
-  if (!["queued", "delivered", "acknowledged", "failed", "cancelled"].includes(String(message.status))) error("status", "message.status is invalid");
+  if (!["queued", "running", "waiting_approval", "delivered", "acknowledged", "failed", "cancelled"].includes(String(message.status))) error("status", "message.status is invalid");
   if (!nonNegativeNumber(message.attempts)) error("attempts", "attempts must be a non-negative number");
   if (!isIsoDate(message.createdAt)) error("createdAt", "createdAt must be an ISO timestamp string");
   if (!isIsoDate(message.updatedAt)) error("updatedAt", "updatedAt must be an ISO timestamp string");
   if (message.status === "delivered" && !isIsoDate(message.deliveredAt)) error("deliveredAt", "delivered messages must include deliveredAt");
+  if (message.status === "running" && !isIsoDate(message.runningAt)) error("runningAt", "running messages must include runningAt");
+  if (message.status === "waiting_approval" && !isIsoDate(message.waitingApprovalAt)) error("waitingApprovalAt", "waiting approval messages must include waitingApprovalAt");
   if (message.status === "acknowledged" && !isIsoDate(message.acknowledgedAt)) error("acknowledgedAt", "acknowledged messages must include acknowledgedAt");
   if (message.status === "failed") {
     if (!isIsoDate(message.failedAt)) error("failedAt", "failed messages must include failedAt");
@@ -279,6 +284,14 @@ export async function validateRelayMailboxContract(mailbox: RelayMailbox, name =
     if (queued.status !== "queued") error("send.status", "send must create queued messages");
     const listed = await mailbox.list({ channel: "contract", status: "queued" });
     if (!listed.some((message) => message.id === queued.id)) error("list", "list must return queued messages by channel/status");
+    if (mailbox.markRunning) {
+      const running = await mailbox.markRunning(queued.id);
+      appendNestedIssues(issues, validateRelayMessageContract(running, `${name}.running`));
+    }
+    if (mailbox.markWaitingApproval) {
+      const waiting = await mailbox.markWaitingApproval(queued.id, "approval_contract");
+      appendNestedIssues(issues, validateRelayMessageContract(waiting, `${name}.waiting_approval`));
+    }
     const delivered = await mailbox.markDelivered(queued.id);
     appendNestedIssues(issues, validateRelayMessageContract(delivered, `${name}.delivered`));
     if (delivered.attempts < queued.attempts + 1) error("markDelivered.attempts", "markDelivered must increment attempts");
@@ -292,6 +305,48 @@ export async function validateRelayMailboxContract(mailbox: RelayMailbox, name =
     error("$", cause instanceof Error ? cause.message : String(cause));
   }
 
+  return report(name, issues);
+}
+
+export function validateWorkspaceManifestContract(manifest: WorkspaceManifest, name = `workspace:${manifest?.name ?? "<missing>"}`): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+  if (!isRecord(manifest)) return report(name, [{ path: "$", message: "workspace manifest must be an object", severity: "error" }]);
+  if (!nonEmptyString(manifest.name)) error("name", "workspace name must be non-empty");
+  if (!nonEmptyString(manifest.root)) error("root", "workspace root must be non-empty");
+  if (!nonEmptyString(manifest.configFile)) error("configFile", "configFile must be non-empty");
+  if (!Array.isArray(manifest.toolsets) || !manifest.toolsets.every(nonEmptyString)) error("toolsets", "toolsets must be non-empty strings");
+  if (!isRecord(manifest.provider) || !nonEmptyString(manifest.provider.type)) error("provider", "provider must include type");
+  if (!["read-only", "workspace-write", "developer", "trusted"].includes(String(manifest.policy))) error("policy", "policy is invalid");
+  if (!Array.isArray(manifest.memoryScopes) || !manifest.memoryScopes.every(nonEmptyString)) error("memoryScopes", "memoryScopes must be strings");
+  if (!isRecord(manifest.assets)) error("assets", "assets summary is required");
+  if (!Array.isArray(manifest.recentRuns)) error("recentRuns", "recentRuns must be an array");
+  return report(name, issues);
+}
+
+export function validateProviderRouteDecisionContract(decision: ProviderRouteDecision, name = `provider-route:${decision?.provider ?? "<missing>"}`): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+  if (!isRecord(decision)) return report(name, [{ path: "$", message: "provider route decision must be an object", severity: "error" }]);
+  if (!nonEmptyString(decision.provider)) error("provider", "provider must be non-empty");
+  if (!nonEmptyString(decision.reason)) error("reason", "reason must be non-empty");
+  if (typeof decision.matched !== "boolean") error("matched", "matched must be boolean");
+  if (!Array.isArray(decision.fallbackProviders) || !decision.fallbackProviders.every(nonEmptyString)) error("fallbackProviders", "fallbackProviders must be strings");
+  if (!["low", "medium", "high"].includes(String(decision.estimatedRisk))) error("estimatedRisk", "estimatedRisk must be low, medium, or high");
+  return report(name, issues);
+}
+
+export function validateLifecycleHookManifestContract(manifest: LifecycleHookManifest, name = `hook:${manifest?.name ?? "<missing>"}`): ContractReport {
+  const issues: ContractIssue[] = [];
+  const error = issueCollector(issues);
+  if (!isRecord(manifest)) return report(name, [{ path: "$", message: "hook manifest must be an object", severity: "error" }]);
+  if (!nonEmptyString(manifest.name)) error("name", "hook name must be non-empty");
+  if (!nonEmptyString(manifest.version)) error("version", "hook version must be non-empty");
+  if (!["BeforeRun", "BeforeContext", "BeforeModel", "BeforeTool", "AfterTool", "AfterRun", "OnApprovalRequired"].includes(String(manifest.hook))) error("hook", "hook point is invalid");
+  if (manifest.risk !== undefined && !["low", "medium", "high"].includes(manifest.risk)) error("risk", "risk must be low, medium, or high");
+  if (manifest.permissions !== undefined && (!Array.isArray(manifest.permissions) || !manifest.permissions.every(nonEmptyString))) error("permissions", "permissions must be strings");
+  if (manifest.timeoutMs !== undefined && (!Number.isInteger(manifest.timeoutMs) || manifest.timeoutMs < 1)) error("timeoutMs", "timeoutMs must be positive");
+  if (manifest.inputSchema !== undefined && !isRecord(manifest.inputSchema)) error("inputSchema", "inputSchema must be a JSON schema object");
   return report(name, issues);
 }
 

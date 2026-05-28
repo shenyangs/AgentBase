@@ -17,10 +17,12 @@ import {
 } from "@agentbase/config";
 import { scanRuntimeEvents, scanTextForGuardrails, summarizeGuardrailResults } from "@agentbase/guardrails";
 import { describeReferencePattern, getReferencePattern, listPatternRunReports, loadReferencePatternCatalog } from "@agentbase/patterns";
+import { routeProvider } from "@agentbase/provider-router";
 import { JsonRelayMailbox, relayMailboxFile } from "@agentbase/relay";
 import { diffReplay } from "@agentbase/replay";
 import { SqlitePlatformStore } from "@agentbase/stores-sqlite";
 import { serializeTraceExport, type TraceExportFormat } from "@agentbase/trace";
+import { createWorkspaceManifest, doctorWorkspace, summarizeWorkspaceAssets } from "@agentbase/workspace";
 
 export type AgentBaseServer = {
   url: string;
@@ -123,6 +125,27 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
         return;
       }
 
+      if (url.pathname === "/api/provider/route/test" && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const config = await requireConfig(options);
+        const task = stringField(body, "task") ?? "";
+        const decision = routeProvider({
+          task,
+          risk: stringField(body, "risk") as never,
+          contextTokens: numberField(body, "contextTokens"),
+          evalImportance: stringField(body, "evalImportance") as never,
+          defaultProvider: config.providers?.default ?? config.provider.type,
+          defaultModel: config.provider.model,
+          routes: config.providers?.routes,
+          fallbacks: config.providers?.fallbacks,
+          budgetUsd: config.providers?.budget?.maxCostUsd
+        });
+        await store.write({ id: createEventId(), runId: "provider-route", type: "provider.route.selected", ts: new Date().toISOString(), data: decision });
+        await store.writeAudit({ action: "provider.route.selected", target: decision.provider, actor: "server", metadata: decision });
+        sendJson(res, 200, decision);
+        return;
+      }
+
       const toolsetEnable = url.pathname.match(/^\/api\/tools\/([^/]+)\/enable$/);
       if (toolsetEnable && req.method === "POST") {
         const config = await requireConfig(options);
@@ -191,6 +214,47 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
 
       if (url.pathname === "/api/runs") {
         sendJson(res, 200, await store.listRuns({ limit: numberParam(url, "limit") ?? 100 }));
+        return;
+      }
+
+      if (url.pathname === "/api/workspace" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile));
+        const recentRuns = await store.listRuns({ limit: numberParam(url, "limit") ?? 10 });
+        const pendingApprovals = (await store.listApprovals({ status: "pending", limit: 10_000 })).length;
+        const manifest = await createWorkspaceManifest({ cwd: workspaceRoot, config, recentRuns, pendingApprovals });
+        manifest.provider.route = routeProvider({
+          task: "workspace cockpit",
+          defaultProvider: config.providers?.default ?? config.provider.type,
+          defaultModel: config.provider.model,
+          routes: config.providers?.routes,
+          fallbacks: config.providers?.fallbacks,
+          budgetUsd: config.providers?.budget?.maxCostUsd
+        });
+        sendJson(res, 200, manifest);
+        return;
+      }
+
+      if (url.pathname === "/api/workspace/assets" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile));
+        sendJson(
+          res,
+          200,
+          await summarizeWorkspaceAssets({
+            cwd: workspaceRoot,
+            config,
+            recentRuns: await store.listRuns({ limit: 100 }),
+            pendingApprovals: (await store.listApprovals({ status: "pending", limit: 10_000 })).length
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === "/api/workspace/doctor" && req.method === "GET") {
+        const config = await requireConfig(options);
+        const workspaceRoot = workspaceRootForConfig(options.configFile) ?? path.dirname(path.resolve(options.sqliteFile));
+        sendJson(res, 200, { checks: await doctorWorkspace({ cwd: workspaceRoot, config }) });
         return;
       }
 
@@ -421,6 +485,21 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
         return;
       }
 
+      if (url.pathname === "/api/inbox" && req.method === "GET") {
+        const mailbox = relayMailboxForServer(options);
+        sendJson(
+          res,
+          200,
+          await mailbox.list({
+            channel: url.searchParams.get("channel") ?? undefined,
+            status: (url.searchParams.get("status") as never) ?? undefined,
+            runId: url.searchParams.get("runId") ?? undefined,
+            limit: numberParam(url, "limit") ?? 100
+          })
+        );
+        return;
+      }
+
       if (url.pathname === "/api/relay" && req.method === "POST") {
         const body = await readJsonBody(req);
         const mailbox = relayMailboxForServer(options);
@@ -454,6 +533,24 @@ export async function startAgentBaseServer(options: AgentBaseServerOptions): Pro
                 ? await mailbox.fail(id, stringField(body, "error") ?? "relay delivery failed")
                 : await mailbox.cancel(id, stringField(body, "reason") ?? "relay message cancelled");
         await store.writeAudit({ action: `relay.${message.status}`, target: message.id, runId: message.runId, actor: "server", metadata: { channel: message.channel, type: message.type, error: message.error } });
+        sendJson(res, 200, message);
+        return;
+      }
+
+      const inboxTransition = url.pathname.match(/^\/api\/inbox\/([^/]+)\/(retry|cancel)$/);
+      if (inboxTransition && req.method === "POST") {
+        const body = await readJsonBody(req);
+        const mailbox = relayMailboxForServer(options);
+        const id = decodeURIComponent(inboxTransition[1]);
+        const action = inboxTransition[2];
+        const current = await mailbox.get(id);
+        if (!current) throw new Error(`Inbox task not found: ${id}`);
+        const message =
+          action === "retry"
+            ? await mailbox.send({ ...current, id: undefined, status: "queued", attempts: 0, metadata: { ...(current.metadata ?? {}), retriedFrom: current.id } })
+            : await mailbox.cancel(id, stringField(body, "reason") ?? "inbox task cancelled");
+        await store.write({ id: createEventId(), runId: message.runId ?? "inbox", type: action === "retry" ? "inbox.queued" : "inbox.cancelled", ts: new Date().toISOString(), data: message });
+        await store.writeAudit({ action: action === "retry" ? "inbox.queued" : "inbox.cancelled", target: message.id, runId: message.runId, actor: "server", metadata: { action } });
         sendJson(res, 200, message);
         return;
       }
@@ -652,13 +749,17 @@ function relayMailboxForServer(options: AgentBaseServerOptions): JsonRelayMailbo
 
 async function writeGovernance(store: SqlitePlatformStore, type: GovernanceEventType, data: Record<string, unknown>, actor: string): Promise<void> {
   await store.write({
-    id: `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    id: createEventId(),
     runId: "governance",
     type,
     ts: new Date().toISOString(),
     data
   });
   await store.writeAudit({ action: type, target: ".agentbase/config.json", actor, metadata: data });
+}
+
+function createEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function normalizeToolsetName(name: string): string {

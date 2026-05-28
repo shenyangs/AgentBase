@@ -15,10 +15,13 @@
     "@agentbase/config": "workspace:*",
     "@agentbase/guardrails": "workspace:*",
     "@agentbase/patterns": "workspace:*",
+    "@agentbase/provider-router": "workspace:*",
+    "@agentbase/relay": "workspace:*",
     "@agentbase/replay": "workspace:*",
     "@agentbase/studio-ui": "workspace:*",
     "@agentbase/stores-sqlite": "workspace:*",
-    "@agentbase/trace": "workspace:*"
+    "@agentbase/trace": "workspace:*",
+    "@agentbase/workspace": "workspace:*"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --clean --platform node",

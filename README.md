@@ -224,8 +224,17 @@ pnpm agentbase patterns run test-runner --target /tmp/agentbase-test-runner-run
 ## Studio 快速演示
 
 ```bash
+pnpm agentbase demo /tmp/agentbase-demo
+pnpm agentbase studio --cwd /tmp/agentbase-demo
+```
+
+也可以手动走完整路径：
+
+```bash
 pnpm agentbase init /tmp/agentbase-demo
 pnpm agentbase run "summarize this repo" --mock --cwd /tmp/agentbase-demo
+pnpm agentbase workspace show --cwd /tmp/agentbase-demo
+pnpm agentbase memory curate --run <run-id> --cwd /tmp/agentbase-demo
 pnpm agentbase guardrail scan --run <run-id> --cwd /tmp/agentbase-demo
 pnpm agentbase store doctor --cwd /tmp/agentbase-demo
 pnpm agentbase studio --cwd /tmp/agentbase-demo
@@ -234,9 +243,12 @@ pnpm agentbase studio --cwd /tmp/agentbase-demo
 打开 Studio 后可以看：
 
 - run timeline
+- workspace cockpit
 - context snapshot
 - tool calls
+- white-box memory lineage
 - artifacts
+- inbox / background tasks
 - guardrail scan
 - replay diff
 - conformance reports
@@ -245,6 +257,12 @@ pnpm agentbase studio --cwd /tmp/agentbase-demo
 
 完整路径见 [Studio Quick Demo](docs/studio_quick_demo.md)。
 前端长什么样、每个面板展示什么，见 [Studio Frontend](docs/studio_frontend.md)。
+
+## 和 PilotDeck / OpenClaw / Claude Code 的关系
+
+AgentBase 会认真吸收这些项目已经验证过的产品判断：工作区隔离、白盒记忆、后台任务、工具插件、模型路由和可见的运行治理。我们的落点是 runtime 标准底座：把这些能力沉淀成可复用接口、trace/audit 事件、conformance tests 和 Studio 治理面，让社区可以基于 AgentBase 构建自己的 agent OS、coding agent、研究 agent 或企业内部 agent 平台。
+
+本轮采用 clean-room 吸收：学习产品模式和接口思想，不直接复制不兼容许可证源码。
 
 ## 发布与贡献
 
@@ -269,6 +287,11 @@ pnpm release:check
 - [Agent Recipes](docs/agent_recipes.md)
 - [Capability and Experience Ledger](docs/capability_and_experience_ledger.md)
 - [Runtime Control Plane and Specialists](docs/runtime_control_plane_and_specialists.md)
+- [Workspace Cockpit](docs/workspace_cockpit.md)
+- [White-Box Memory](docs/white_box_memory.md)
+- [Provider Router](docs/provider_router.md)
+- [Always-On Relay](docs/always_on_relay.md)
+- [Plugin Lifecycle Hooks](docs/plugin_lifecycle_hooks.md)
 - [AgentBase Doctrine](docs/agentbase_doctrine.md)
 
 ---

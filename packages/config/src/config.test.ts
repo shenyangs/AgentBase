@@ -8,6 +8,7 @@ describe("@agentbase/config", () => {
     expect(enableToolset(config, "@agentbase/tools-http").toolsets).toContain("@agentbase/tools-http");
     expect(disableToolset(enableToolset(config, "@agentbase/tools-http"), "@agentbase/tools-http").toolsets).not.toContain("@agentbase/tools-http");
     expect(patchConfig(config, { provider: { type: "mock", model: "mock/other" } }).provider.model).toBe("mock/other");
+    expect(patchConfig(config, { providers: { routes: [{ id: "route", provider: "mock", match: { keywords: ["repo"] } }] } }).providers?.routes?.[0]?.id).toBe("route");
     expect(setConfigPath(config, "policy", "read-only").policy).toBe("read-only");
     expect(patchConfig(config, { orchestration: { defaultMode: "flow", maxParallelTasks: 4 } }).orchestration?.maxParallelTasks).toBe(4);
     expect(redactConfig({ ...config, provider: { ...config.provider, apiKey: "sk-secret" } as never }).provider).toEqual(expect.objectContaining({ apiKey: "[REDACTED]" }));
